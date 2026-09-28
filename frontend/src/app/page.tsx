@@ -8,6 +8,9 @@ import {
   TrainListItem,
   ModelMetricsResponse,
   EventInjectionResponse,
+  DataSourceConfigResponse,
+  DemoScenarioResponse,
+  DemoActionResult,
 } from "@/types/api";
 
 /**
@@ -95,15 +98,23 @@ export default function ControlRoomDashboard() {
   // Data states
   const [trains, setTrains] = useState<TrainListItem[]>([]);
   const [metrics, setMetrics] = useState<ModelMetricsResponse | null>(null);
+  const [dataSourceConfig, setDataSourceConfig] = useState<DataSourceConfigResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState<boolean>(false);
+  const [staleError, setStaleError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  // Keep ref to trains to retain last successful state upon poll failure
+  const trainsRef = useRef<TrainListItem[]>([]);
+  trainsRef.current = trains;
 
   // View state: "table" | "cards"
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
 
-  // Configurable Polling
-  const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(5000); // Default 5 seconds
+  // Configurable Polling (conservative default: 15s)
+  const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(15000);
   const [isPollingActive, setIsPollingActive] = useState<boolean>(true);
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -117,31 +128,60 @@ export default function ControlRoomDashboard() {
   const [injectionResult, setInjectionResult] = useState<EventInjectionResponse | null>(null);
   const [injectionError, setInjectionError] = useState<string | null>(null);
 
+  // Deterministic Hackathon Demo Mode states
+  const [demoScenario, setDemoScenario] = useState<DemoScenarioResponse | null>(null);
+  const [demoLoading, setDemoLoading] = useState<boolean>(false);
+  const [demoActionActive, setDemoActionActive] = useState<string | null>(null);
+  const [demoResult, setDemoResult] = useState<DemoActionResult | null>(null);
+  const [demoError, setDemoError] = useState<string | null>(null);
+
   // Fetch all dashboard data from backend
   const fetchDashboardData = useCallback(async (isInitial = false) => {
-    if (isInitial) setLoading(true);
-    setError(null);
+    if (isInitial) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setIsUpdating(true);
+    }
 
     try {
-      const [trainsRes, metricsRes] = await Promise.all([
+      const [trainsRes, metricsRes, configRes, demoRes] = await Promise.all([
         api.getTrains(),
         api.getModelMetrics().catch(() => null),
+        api.getDataSourceConfig().catch(() => null),
+        api.getDemoScenario().catch(() => null),
       ]);
 
       setTrains(trainsRes.trains);
       if (metricsRes) {
         setMetrics(metricsRes);
       }
+      if (configRes) {
+        setDataSourceConfig(configRes);
+      }
+      if (demoRes) {
+        setDemoScenario(demoRes);
+      }
       setLastRefreshed(new Date());
+      setIsStale(false);
+      setStaleError(null);
+      setError(null);
 
       if (trainsRes.trains.length > 0 && !selectedTrain) {
         setSelectedTrain(trainsRes.trains[0].train_number);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
-      setError(msg);
+      if (isInitial && trainsRef.current.length === 0) {
+        setError(msg);
+      } else {
+        // Retain last successful state and display non-blocking stale warning
+        setIsStale(true);
+        setStaleError(msg);
+      }
     } finally {
       if (isInitial) setLoading(false);
+      else setIsUpdating(false);
     }
   }, [selectedTrain]);
 
@@ -199,6 +239,38 @@ export default function ControlRoomDashboard() {
     }
   };
 
+  // Deterministic Hackathon Demo Mode Handlers (Seed 42)
+  const handleResetDemo = async () => {
+    setDemoLoading(true);
+    setDemoError(null);
+    setDemoResult(null);
+    try {
+      const res = await api.resetDemoScenario();
+      setDemoScenario(res);
+      await fetchDashboardData(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to reset demo scenario";
+      setDemoError(msg);
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
+  const handleExecuteDemoAction = async (actionId: string) => {
+    setDemoActionActive(actionId);
+    setDemoError(null);
+    try {
+      const res = await api.executeDemoAction(actionId);
+      setDemoResult(res);
+      await fetchDashboardData(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Failed to execute demo action ${actionId}`;
+      setDemoError(msg);
+    } finally {
+      setDemoActionActive(null);
+    }
+  };
+
   // Top Summary Calculations
   const runningTrainsCount = trains.filter(
     (t) => t.current_state?.status === "RUNNING"
@@ -221,9 +293,33 @@ export default function ControlRoomDashboard() {
       {/* Page Header with Polling Control */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-200 gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Railway Control Room Dashboard
-          </h1>
+          <div className="flex items-center space-x-2.5">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Railway Control Room Dashboard
+            </h1>
+            {dataSourceConfig && (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                  dataSourceConfig.effective_mode === "LIVE_API"
+                    ? "bg-purple-100 text-purple-800 border border-purple-300"
+                    : "bg-blue-100 text-blue-800 border border-blue-300"
+                }`}
+                title={`Configured: ${dataSourceConfig.configured_mode} | Effective: ${dataSourceConfig.effective_mode}${dataSourceConfig.cache_active ? ` | Cache TTL: ${dataSourceConfig.cache_ttl_seconds}s` : ""}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 mr-1.5 rounded-full ${
+                    dataSourceConfig.effective_mode === "LIVE_API" ? "bg-purple-600" : "bg-blue-600"
+                  }`}
+                />
+                {dataSourceConfig.effective_mode}
+                {dataSourceConfig.fallback_to_simulator && (
+                  <span className="ml-1 text-[10px] text-amber-700 font-normal">
+                    (Fallback Active)
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-slate-500 mt-1">
             Real-time fleet operations, delay trends, and XGBoost machine-learning ETA forecasting.
           </p>
@@ -231,6 +327,14 @@ export default function ControlRoomDashboard() {
 
         {/* Polling & Refresh Controls */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
+          {/* Subtle Updating Indicator */}
+          {isUpdating && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
+              <span className="w-1.5 h-1.5 mr-1.5 rounded-full bg-blue-600 animate-ping" />
+              Updating...
+            </span>
+          )}
+
           {/* Polling Status Toggle */}
           <button
             onClick={() => setIsPollingActive(!isPollingActive)}
@@ -248,7 +352,7 @@ export default function ControlRoomDashboard() {
             <span>{isPollingActive ? "Live Polling Active" : "Polling Paused"}</span>
           </button>
 
-          {/* Configurable Interval Dropdown */}
+          {/* Configurable Interval Dropdown (Conservative Default) */}
           <div className="flex items-center space-x-1 bg-white border border-slate-300 rounded px-2 py-1">
             <span className="text-slate-500 font-medium">Interval:</span>
             <select
@@ -257,20 +361,21 @@ export default function ControlRoomDashboard() {
               disabled={!isPollingActive}
               className="bg-transparent font-mono text-slate-800 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="2000">2s</option>
-              <option value="5000">5s (Default)</option>
-              <option value="10000">10s</option>
-              <option value="30000">30s</option>
-              <option value="60000">60s</option>
+              <option value="5000">5s (Rapid)</option>
+              <option value="10000">10s (Standard)</option>
+              <option value="15000">15s (Default)</option>
+              <option value="30000">30s (Conservative)</option>
+              <option value="60000">60s (Slow)</option>
             </select>
           </div>
 
           {/* Manual Refresh Button */}
           <button
             onClick={() => fetchDashboardData(false)}
-            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded shadow-2xs transition-colors flex items-center space-x-1"
+            disabled={isUpdating}
+            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded shadow-2xs transition-colors flex items-center space-x-1 disabled:opacity-50"
           >
-            <span>🔄</span>
+            <span className={isUpdating ? "animate-spin" : ""}>🔄</span>
             <span>Refresh Now</span>
           </button>
 
@@ -365,7 +470,7 @@ export default function ControlRoomDashboard() {
         </div>
       </div>
 
-      {/* ERROR BANNER */}
+      {/* ERROR BANNER (Initial Load Failure) */}
       {error && (
         <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
@@ -380,6 +485,28 @@ export default function ControlRoomDashboard() {
             className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-medium text-xs rounded transition-colors"
           >
             Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* NON-BLOCKING STALE DATA WARNING BANNER */}
+      {isStale && (
+        <div className="p-3 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-amber-600 font-bold text-base">⚠️</span>
+            <div>
+              <span className="font-semibold">Live Polling Interrupted:</span> Retaining last known fleet telemetry
+              {lastRefreshed && (
+                <span> from <strong>{lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</strong></span>
+              )}.
+              {staleError && <span className="text-amber-700 ml-1">({staleError})</span>}
+            </div>
+          </div>
+          <button
+            onClick={() => fetchDashboardData(false)}
+            className="px-3 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-semibold rounded text-xs transition-colors shrink-0"
+          >
+            Retry Sync
           </button>
         </div>
       )}
@@ -446,12 +573,15 @@ export default function ControlRoomDashboard() {
                   <thead className="bg-slate-50 text-slate-600 text-xs font-semibold uppercase tracking-wider text-left">
                     <tr>
                       <th className="px-4 py-3">Train</th>
-                      <th className="px-4 py-3">Current Station</th>
-                      <th className="px-4 py-3">Current Delay</th>
-                      <th className="px-4 py-3">Delay Trend</th>
-                      <th className="px-4 py-3">Next Station</th>
+                      <th className="px-3 py-3">Source</th>
+                      <th className="px-3 py-3">Current Station</th>
+                      <th className="px-3 py-3">Current Delay</th>
+                      <th className="px-3 py-3">Delay Trend</th>
+                      <th className="px-3 py-3">Next Station</th>
+                      <th className="px-3 py-3">Baseline ETA</th>
                       <th className="px-4 py-3 bg-blue-50/50 text-blue-900">Next ML ETA</th>
-                      <th className="px-4 py-3 text-right">Action</th>
+                      <th className="px-3 py-3">Last Updated</th>
+                      <th className="px-3 py-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
@@ -481,13 +611,33 @@ export default function ControlRoomDashboard() {
                                 }`}
                               />
                             </div>
-                            <div className="text-xs text-slate-500 truncate max-w-[150px]">
+                            <div className="text-xs text-slate-500 truncate max-w-[140px]">
                               {train.name}
                             </div>
                           </td>
 
+                          {/* Data Source Badge */}
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${
+                                train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
+                                  ? "bg-purple-50 text-purple-700 border-purple-200"
+                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
+                                ? "LIVE"
+                                : "SIMULATOR"}
+                              {train.is_fallback && (
+                                <span className="ml-1 text-[9px] text-amber-600 font-bold" title="Fell back to simulator">
+                                  (FB)
+                                </span>
+                              )}
+                            </span>
+                          </td>
+
                           {/* Current Station */}
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-3">
                             <div className="font-semibold text-slate-800">
                               {train.current_station || state?.current_station_code || "Origin"}
                             </div>
@@ -497,7 +647,7 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Current Delay */}
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-3">
                             <span
                               className={`inline-block px-2.5 py-0.5 text-xs font-semibold border rounded ${delayInfo.colorClass}`}
                             >
@@ -506,7 +656,7 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Delay Trend Sparkline */}
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-3">
                             <DelayTrendSparkline
                               history={train.delay_history || [delayVal]}
                               trend={train.delay_trend ?? 0}
@@ -514,7 +664,7 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Next Station */}
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-3">
                             <div className="font-semibold text-slate-800">
                               {train.next_station || state?.next_station_code || "Terminus"}
                             </div>
@@ -525,6 +675,22 @@ export default function ControlRoomDashboard() {
                             )}
                           </td>
 
+                          {/* Baseline ETA */}
+                          <td className="px-3 py-3 font-mono text-xs">
+                            {train.baseline_eta ? (
+                              <div>
+                                <div className="font-semibold text-slate-700">
+                                  {formatTime(train.baseline_eta)}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {formatDateTime(train.baseline_eta)}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">--:--</span>
+                            )}
+                          </td>
+
                           {/* Next ML ETA */}
                           <td className="px-4 py-3 bg-blue-50/20">
                             {train.ml_eta ? (
@@ -532,17 +698,31 @@ export default function ControlRoomDashboard() {
                                 <div className="font-bold text-sm text-blue-700 font-mono">
                                   {formatTime(train.ml_eta)}
                                 </div>
-                                <div className="text-[11px] text-slate-400">
+                                <div className="text-[10px] text-slate-400">
                                   {formatDateTime(train.ml_eta)}
                                 </div>
+                                {train.confidence_range && (
+                                  <div className="text-[10px] text-blue-600 font-sans mt-0.5">
+                                    &plusmn;{train.confidence_range.margin_minutes.toFixed(0)}m conf
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <span className="text-xs text-slate-400">--:--</span>
                             )}
                           </td>
 
+                          {/* Last Updated */}
+                          <td className="px-3 py-3 text-[11px] text-slate-500 font-mono whitespace-nowrap">
+                            {train.last_updated
+                              ? formatTime(train.last_updated)
+                              : lastRefreshed
+                              ? formatTime(lastRefreshed.toISOString())
+                              : "--:--"}
+                          </td>
+
                           {/* Action */}
-                          <td className="px-4 py-3 text-right">
+                          <td className="px-3 py-3 text-right">
                             <span className="inline-block text-xs font-semibold text-blue-600 group-hover:underline">
                               View Details &rarr;
                             </span>
@@ -581,6 +761,18 @@ export default function ControlRoomDashboard() {
                                   : "bg-slate-400"
                               }`}
                             />
+                            <span
+                              className={`inline-block px-1.5 py-0.2 text-[10px] font-semibold rounded border ${
+                                train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
+                                  ? "bg-purple-50 text-purple-700 border-purple-200"
+                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
+                                ? "LIVE"
+                                : "SIM"}
+                              {train.is_fallback && <span className="text-amber-600 font-bold ml-0.5">(FB)</span>}
+                            </span>
                           </div>
                           <div className="text-xs text-slate-500 line-clamp-1">
                             {train.name}
@@ -608,21 +800,38 @@ export default function ControlRoomDashboard() {
                         </div>
                       </div>
 
-                      <div className="p-2.5 bg-blue-50/50 rounded border border-blue-100 flex justify-between items-center text-xs">
+                      <div className="p-2.5 bg-blue-50/50 rounded border border-blue-100 grid grid-cols-2 gap-2 text-xs">
                         <div>
-                          <div className="text-blue-900 font-medium text-[11px]">
-                            Next Station ML ETA:
+                          <div className="text-slate-500 font-medium text-[10px]">
+                            Baseline ETA:
+                          </div>
+                          <div className="font-semibold text-slate-700 font-mono">
+                            {train.baseline_eta ? formatTime(train.baseline_eta) : "--:--"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-blue-900 font-medium text-[10px]">
+                            Next ML ETA:
                           </div>
                           <div className="font-bold text-blue-700 text-sm font-mono">
-                            {train.ml_eta ? formatDateTime(train.ml_eta) : "--:--"}
+                            {train.ml_eta ? formatTime(train.ml_eta) : "--:--"}
                           </div>
+                          {train.confidence_range && (
+                            <div className="text-[10px] text-blue-600 font-sans">
+                              &plusmn;{train.confidence_range.margin_minutes.toFixed(0)}m
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <DelayTrendSparkline
-                            history={train.delay_history || [delayVal]}
-                            trend={train.delay_trend ?? 0}
-                          />
-                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-100 font-mono">
+                        <span>
+                          Updated: {train.last_updated ? formatTime(train.last_updated) : lastRefreshed ? formatTime(lastRefreshed.toISOString()) : "--:--"}
+                        </span>
+                        <DelayTrendSparkline
+                          history={train.delay_history || [delayVal]}
+                          trend={train.delay_trend ?? 0}
+                        />
                       </div>
                     </div>
                   );
@@ -634,6 +843,198 @@ export default function ControlRoomDashboard() {
 
         {/* Right Column: Operational Disruption Controls */}
         <div className="space-y-6">
+          {/* Deterministic Hackathon Demo Mode Card */}
+          <div className="bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 rounded-lg border-2 border-indigo-200 shadow-xs p-5 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-lg">🎯</span>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Hackathon Demo Mode
+                  </h2>
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                    SEED: 42
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  Deterministic scenario with <strong>Train 12302</strong> on the NDLS-HWH trunk corridor.
+                  Evaluates the full pipeline: <em>Simulator &rarr; State &rarr; Feature &rarr; Baseline &rarr; ML ETA &rarr; Views</em>.
+                </p>
+              </div>
+            </div>
+
+            {/* Current Demo Scenario State Summary */}
+            {demoScenario && (
+              <div className="p-3 bg-white/90 rounded-md border border-indigo-100 text-xs space-y-2 shadow-2xs">
+                <div className="flex justify-between items-center text-slate-700">
+                  <span>
+                    Train: <strong>{demoScenario.train_number}</strong> ({demoScenario.current_station} &rarr; {demoScenario.next_station})
+                  </span>
+                  <span className="font-mono text-[11px] font-semibold text-indigo-700">
+                    {demoScenario.train_status} ({demoScenario.current_speed_kmh.toFixed(0)} km/h)
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px] pt-1 border-t border-slate-100">
+                  <div>
+                    <span className="text-slate-500">Delay:</span>{" "}
+                    <strong className="text-rose-600 font-mono">
+                      +{demoScenario.current_delay_minutes.toFixed(1)}m
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Baseline:</span>{" "}
+                    <strong className="text-slate-800 font-mono">
+                      {formatTime(demoScenario.baseline_eta)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-indigo-600 font-medium">ML ETA:</span>{" "}
+                    <strong className="text-indigo-700 font-mono font-bold">
+                      {formatTime(demoScenario.ml_eta)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Demo Reset Button */}
+            <button
+              type="button"
+              onClick={handleResetDemo}
+              disabled={demoLoading}
+              className="w-full py-2 px-3 rounded-md text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors flex items-center justify-center space-x-1.5 disabled:opacity-50"
+            >
+              <span>{demoLoading ? "⏳" : "🔄"}</span>
+              <span>{demoLoading ? "Resetting Scenario..." : "Reset Demo Scenario (Seed 42)"}</span>
+            </button>
+
+            {/* 3 Prepared Demo Actions */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                Prepared Disruption Actions:
+              </label>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("signal_halt")}
+                  disabled={demoActionActive !== null}
+                  className="w-full p-2.5 rounded-md text-left text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all flex items-center justify-between disabled:opacity-50 group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">🔴</span>
+                    <div>
+                      <div className="font-bold text-rose-900 group-hover:text-rose-950">
+                        1. Signal Halt (+15m)
+                      </div>
+                      <div className="text-[10px] text-rose-700">
+                        Signal red &bull; Speed drops to 0 km/h &bull; Status: HALTED
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-rose-600 font-mono font-semibold">
+                    {demoActionActive === "signal_halt" ? "Running..." : "Inject &rarr;"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("congestion")}
+                  disabled={demoActionActive !== null}
+                  className="w-full p-2.5 rounded-md text-left text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all flex items-center justify-between disabled:opacity-50 group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">🟠</span>
+                    <div>
+                      <div className="font-bold text-amber-900 group-hover:text-amber-950">
+                        2. Line Congestion (+10m)
+                      </div>
+                      <div className="text-[10px] text-amber-700">
+                        Suburban block ahead &bull; Speed restricted to 49.5 km/h &bull; RUNNING
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-amber-600 font-mono font-semibold">
+                    {demoActionActive === "congestion" ? "Running..." : "Inject &rarr;"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("speed_restriction")}
+                  disabled={demoActionActive !== null}
+                  className="w-full p-2.5 rounded-md text-left text-xs bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 transition-all flex items-center justify-between disabled:opacity-50 group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">🟡</span>
+                    <div>
+                      <div className="font-bold text-yellow-900 group-hover:text-yellow-950">
+                        3. Speed Restriction (+8m)
+                      </div>
+                      <div className="text-[10px] text-yellow-700">
+                        Track maintenance zone &bull; Speed restricted to 30.0 km/h &bull; RUNNING
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-yellow-700 font-mono font-semibold">
+                    {demoActionActive === "speed_restriction" ? "Running..." : "Inject &rarr;"}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Action Feedback Banner */}
+            {demoResult && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-md text-xs space-y-1.5 animate-fadeIn">
+                <div className="font-bold text-emerald-800 flex items-center space-x-1">
+                  <span>✓</span>
+                  <span>{demoResult.action_name} Executed</span>
+                </div>
+                <div className="text-slate-700 text-[11px]">
+                  <strong>New Delay:</strong> +{demoResult.new_delay_minutes.toFixed(1)}m &bull;{" "}
+                  <strong>Status:</strong> {demoResult.new_status} &bull;{" "}
+                  <strong>Speed:</strong> {demoResult.speed_kmh.toFixed(1)} km/h
+                </div>
+                <div className="text-[11px] font-mono text-slate-700 flex justify-between pt-1 border-t border-emerald-200/60">
+                  <span>Baseline: <strong>{formatTime(demoResult.baseline_eta)}</strong></span>
+                  <span className="text-indigo-800 font-bold">ML ETA: {formatTime(demoResult.ml_eta)}</span>
+                </div>
+              </div>
+            )}
+
+            {demoError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs">
+                <strong>Demo Error:</strong> {demoError}
+              </div>
+            )}
+
+            {/* Quick View Links to verify all 3 views */}
+            <div className="pt-2 border-t border-indigo-100">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                Verify Across All Views:
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 text-center">
+                <Link
+                  href="/trains/12302"
+                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
+                >
+                  Train 12302
+                </Link>
+                <Link
+                  href="/station?code=PRYJ"
+                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
+                >
+                  PRYJ Board
+                </Link>
+                <Link
+                  href="/passenger?train=12302"
+                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
+                >
+                  Passenger
+                </Link>
+              </div>
+            </div>
+          </div>
+
           {/* Disruption Event Injection Card */}
           <div className="bg-white rounded-lg border border-slate-200 shadow-2xs p-5">
             <h2 className="text-base font-semibold text-slate-900 mb-1 flex items-center">

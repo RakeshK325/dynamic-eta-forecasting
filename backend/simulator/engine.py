@@ -58,7 +58,7 @@ class TrainSimulator:
         if not session:
             raise ValueError("Database session required to load trains and routes from SQLite.")
 
-        target_date = journey_date or date.today()
+        target_date = journey_date or (self.sim_time.date() if hasattr(self, "sim_time") and self.sim_time else datetime.now(timezone.utc).date())
 
         query = session.query(Train).options(
             joinedload(Train.route)

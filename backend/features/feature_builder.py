@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timezone
 from typing import List, Dict, Optional, Any, Tuple
 from pydantic import BaseModel, Field
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database.models import Train, Route, RouteStation, Station
 from backend.services.schemas import TrainRunningState
 from backend.simulator.events import EventType
+
+logger = logging.getLogger("dynamic_eta.features")
 
 
 class TrainFeatures(BaseModel):
@@ -34,6 +37,31 @@ class TrainFeatures(BaseModel):
     # 4. Contextual features
     weather_flag: int = Field(description="1 if adverse weather (fog, heavy rain) active, else 0")
     day_type: int = Field(description="Day type classification: 0=Weekday, 1=Weekend, 2=Holiday")
+
+    # 5. Provenance metadata (tracking source: live data, historical data, simulator/default source)
+    feature_provenance: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Source mapping for each feature ('live data', 'historical data', 'simulator/default source')",
+    )
+    estimated_features: List[str] = Field(
+        default_factory=list,
+        description="List of features that used fallback or estimated defaults because they are unavailable in live telemetry",
+    )
+
+    @property
+    def live_features(self) -> List[str]:
+        """List of feature names derived from live data."""
+        return [f for f, src in self.feature_provenance.items() if src == "live data"]
+
+    @property
+    def historical_features(self) -> List[str]:
+        """List of feature names derived from historical data."""
+        return [f for f, src in self.feature_provenance.items() if src == "historical data"]
+
+    @property
+    def default_features(self) -> List[str]:
+        """List of feature names derived from simulator or default fallbacks."""
+        return [f for f, src in self.feature_provenance.items() if src == "simulator/default source"]
 
     def to_model_input_dict(self) -> Dict[str, Any]:
         """Returns the dictionary containing only the 11 numeric features for model training/inference."""
@@ -206,6 +234,11 @@ class FeatureBuilder:
         # Handle segment progression
         progress = max(0.0, min(1.0, float(train_state.segment_progress or 0.0)))
 
+        # Check if train telemetry is from live API or simulator
+        is_live = str(train_state.source or "").lower() in ("external_api", "live_api", "live")
+        feature_provenance: Dict[str, str] = {}
+        estimated_features: List[str] = []
+
         if target_idx < curr_idx:
             # Target station is already in the past
             distance_to_go_km = 0.0
@@ -223,42 +256,73 @@ class FeatureBuilder:
                 next_stop = stops[curr_idx + 1]
                 next_dist = float(getattr(next_stop, "distance_from_source_km", getattr(next_stop, "dist_km", curr_dist)))
                 seg_dist = max(0.0, next_dist - curr_dist)
-                dist_covered_on_seg = progress * seg_dist
+
+                # Requirement 2: Map live next_station_distance_km if provided
+                if train_state.next_station_distance_km is not None and seg_dist > 0:
+                    live_dist_remaining = max(0.0, float(train_state.next_station_distance_km))
+                    if target_idx == curr_idx + 1:
+                        distance_to_go_km = round(min(live_dist_remaining, seg_dist), 2)
+                    else:
+                        distance_to_go_km = round(min(live_dist_remaining, seg_dist) + max(0.0, target_dist - next_dist), 2)
+
+                    dist_covered_on_seg = max(0.0, seg_dist - min(live_dist_remaining, seg_dist))
+                    effective_progress = dist_covered_on_seg / seg_dist if seg_dist > 0 else 0.0
+                else:
+                    dist_covered_on_seg = progress * seg_dist
+                    curr_position_km = curr_dist + dist_covered_on_seg
+                    distance_to_go_km = max(0.0, round(target_dist - curr_position_km, 2))
+                    effective_progress = progress
 
                 # Timetable across immediate next segment
                 next_code_clean = getattr(next_stop, "station_code", getattr(next_stop, "code", ""))
                 next_sched_time = cumulative_times.get(next_code_clean, curr_sched_time)
                 seg_time = max(0.0, next_sched_time - curr_sched_time)
-                time_covered_on_seg = progress * seg_time
+                time_covered_on_seg = effective_progress * seg_time
             else:
                 dist_covered_on_seg = 0.0
                 time_covered_on_seg = 0.0
-
-            curr_position_km = curr_dist + dist_covered_on_seg
-            distance_to_go_km = max(0.0, round(target_dist - curr_position_km, 2))
+                distance_to_go_km = 0.0
 
             curr_position_time = curr_sched_time + time_covered_on_seg
             scheduled_time_to_go_min = max(0.0, round(target_sched_time - curr_position_time, 2))
-
             num_intermediate_halts = max(0, target_idx - curr_idx - 1)
 
-        # 3. Dynamic features
+        # 1. Positional features provenance
+        pos_source = "live data" if is_live else "simulator/default source"
+        feature_provenance["distance_to_go_km"] = pos_source
+        feature_provenance["scheduled_time_to_go_min"] = pos_source
+        feature_provenance["num_intermediate_halts"] = pos_source
+
+        # 2. Dynamic state features
         current_delay_min = round(float(train_state.current_delay_minutes or 0.0), 2)
+        feature_provenance["current_delay_min"] = "live data" if is_live else "simulator/default source"
 
         # Delay trend over last 3 checkpoints
         delay_trend_3pt = self._calculate_delay_trend(current_delay_min, recent_delays)
+        if recent_delays and len(recent_delays) >= 2:
+            feature_provenance["delay_trend_3pt"] = "live data" if is_live else "simulator/default source"
+        else:
+            feature_provenance["delay_trend_3pt"] = "simulator/default source"
+            if is_live:
+                estimated_features.append("delay_trend_3pt")
 
-        # Active speed restriction flag
+        # Active speed restriction flag (Requirement 3 & 4: no fake values, clear defaults)
         if speed_restriction_flag is not None:
             active_tsr = 1 if speed_restriction_flag else 0
+            feature_provenance["active_speed_restriction_flag"] = "live data" if is_live else "simulator/default source"
         elif active_events:
             active_tsr = 1 if any(getattr(e, "event_type", "") in ("SPEED_RESTRICTION", EventType.SPEED_RESTRICTION) for e in active_events) else 0
+            feature_provenance["active_speed_restriction_flag"] = "simulator/default source"
         else:
             active_tsr = 0
+            feature_provenance["active_speed_restriction_flag"] = "simulator/default source"
+            if is_live:
+                estimated_features.append("active_speed_restriction_flag")
 
-        # Congestion score downstream
+        # Congestion score downstream (Requirement 3 & 4: no fake values, clear defaults)
         if congestion_score is not None:
             cong_score = max(0.0, min(1.0, float(congestion_score)))
+            feature_provenance["congestion_score_downstream"] = "live data" if is_live else "simulator/default source"
         elif active_events:
             cong_ev = next(
                 (e for e in active_events if getattr(e, "event_type", "") in ("CONGESTION", EventType.CONGESTION)),
@@ -270,23 +334,57 @@ class FeatureBuilder:
                 cong_score = round(max(0.0, min(1.0, 1.0 - factor)), 2)
             else:
                 cong_score = 0.0
+            feature_provenance["congestion_score_downstream"] = "simulator/default source"
         else:
             cong_score = 0.0
+            feature_provenance["congestion_score_downstream"] = "simulator/default source"
+            if is_live:
+                estimated_features.append("congestion_score_downstream")
 
-        # Weather flag
+        # Weather flag (Requirement 3 & 4: no fake values, clear defaults)
         if weather_flag is not None:
             w_flag = 1 if weather_flag else 0
+            feature_provenance["weather_flag"] = "live data" if is_live else "simulator/default source"
         elif active_events:
             w_flag = 1 if any(getattr(e, "event_type", "") in ("WEATHER", EventType.WEATHER) for e in active_events) else 0
+            feature_provenance["weather_flag"] = "simulator/default source"
         else:
             w_flag = 0
+            feature_provenance["weather_flag"] = "simulator/default source"
+            if is_live:
+                estimated_features.append("weather_flag")
 
-        # 4. Historical section statistics (Day 1 MVP synthetic defaults)
+        # 3. Historical section statistics (Requirement 3: use existing historical feature provider)
         hist_avg_delay = self.stats_provider.get_hist_avg_delay(curr_code_clean, target_code_clean)
         hist_recovery = self.stats_provider.get_hist_recovery_rate(curr_code_clean, target_code_clean)
+        feature_provenance["hist_avg_delay_this_section"] = "historical data"
+        feature_provenance["hist_recovery_rate_section"] = "historical data"
 
-        # 5. Day type classification: 0=Weekday, 1=Weekend, 2=Holiday
+        # 4. Contextual feature (Day type classification: 0=Weekday, 1=Weekend, 2=Holiday)
         day_type = self._determine_day_type(train_state.journey_date, is_holiday)
+        feature_provenance["day_type"] = "live data" if is_live else "simulator/default source"
+
+        # Requirement: Logging showing which features came from:
+        # - live data
+        # - historical data
+        # - simulator/default source
+        live_list = [f for f, src in feature_provenance.items() if src == "live data"]
+        hist_list = [f for f, src in feature_provenance.items() if src == "historical data"]
+        default_list = [f for f, src in feature_provenance.items() if src == "simulator/default source"]
+
+        logger.info(
+            "Feature mapping for train %s -> %s (source=%s):\n"
+            "  - live data: %s\n"
+            "  - historical data: %s\n"
+            "  - simulator/default source: %s%s",
+            train_state.train_number,
+            target_code,
+            train_state.source,
+            ", ".join(live_list) if live_list else "none",
+            ", ".join(hist_list) if hist_list else "none",
+            ", ".join(default_list) if default_list else "none",
+            f" (estimated/default: {', '.join(estimated_features)})" if estimated_features else "",
+        )
 
         return TrainFeatures(
             train_number=train_state.train_number,
@@ -302,6 +400,8 @@ class FeatureBuilder:
             hist_recovery_rate_section=hist_recovery,
             weather_flag=w_flag,
             day_type=day_type,
+            feature_provenance=feature_provenance,
+            estimated_features=estimated_features,
         )
 
     def _resolve_route_stops(

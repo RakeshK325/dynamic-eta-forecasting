@@ -13,6 +13,9 @@ import {
   EventInjectionRequest,
   EventInjectionResponse,
   ModelMetricsResponse,
+  DataSourceConfigResponse,
+  DemoScenarioResponse,
+  DemoActionResult,
 } from "@/types/api";
 
 const API_BASE_URL =
@@ -132,6 +135,38 @@ export const api = {
    */
   async getModelMetrics(): Promise<ModelMetricsResponse> {
     return request<ModelMetricsResponse>("/model/metrics");
+  },
+
+  /**
+   * Fetch current system data-source telemetry mode and cache stats.
+   */
+  async getDataSourceConfig(): Promise<DataSourceConfigResponse> {
+    return request<DataSourceConfigResponse>("/system/data-source");
+  },
+
+  /**
+   * Reset deterministic hackathon demo scenario (Seed 42).
+   */
+  async resetDemoScenario(): Promise<DemoScenarioResponse> {
+    return request<DemoScenarioResponse>("/demo/reset", {
+      method: "POST",
+    });
+  },
+
+  /**
+   * Fetch current state of the deterministic hackathon demo scenario.
+   */
+  async getDemoScenario(): Promise<DemoScenarioResponse> {
+    return request<DemoScenarioResponse>("/demo/scenario");
+  },
+
+  /**
+   * Execute prepared hackathon demo action deterministically.
+   */
+  async executeDemoAction(actionId: string): Promise<DemoActionResult> {
+    return request<DemoActionResult>(`/demo/action/${encodeURIComponent(actionId)}`, {
+      method: "POST",
+    });
   },
 };
 

@@ -16,7 +16,9 @@ from backend.services.railway_api_client import (
     RateLimitExceededError,
     APITimeoutError,
     MalformedResponseError,
+    ServiceUnavailableError,
     NormalizedLiveTrain,
+    sanitize_secret,
 )
 
 
@@ -244,3 +246,30 @@ def test_debug_file_output(mock_live_response, tmp_path):
         with open(debug_file, "r") as f:
             dumped = json.load(f)
         assert dumped["data"]["trainNumber"] == "12302"
+
+
+def test_http_503_service_unavailable():
+    """Verify handling of RailRadar temporary service unavailability (HTTP 503)."""
+    client = RailRadarClient(api_key="valid_key")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 503
+    mock_resp.text = "Service Unavailable: Down for maintenance"
+
+    with patch("httpx.Client.get", return_value=mock_resp):
+        with pytest.raises(ServiceUnavailableError) as exc_info:
+            client.fetch_live_train("12302")
+        assert "HTTP 503" in str(exc_info.value)
+        assert "temporarily unavailable" in str(exc_info.value).lower()
+
+
+def test_sanitize_secret():
+    """Verify that sanitize_secret completely strips API keys from strings."""
+    secret = "rr_live_supersecret12345"
+    sample_text = f"Failed to connect using key {secret} at https://api.railradar.in?key={secret}"
+
+    cleaned = sanitize_secret(sample_text, secret=secret)
+    assert secret not in cleaned
+    assert "***MASKED_API_KEY***" in cleaned
+
+

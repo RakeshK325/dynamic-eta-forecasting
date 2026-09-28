@@ -315,6 +315,43 @@ export default function TrainDetailPage({ params }: PageProps) {
     }
   };
 
+  // Hackathon Demo Handlers (Train 12302, Seed 42)
+  const handleResetDemo = async () => {
+    setInjecting(true);
+    setInjectSuccess(null);
+    setInjectError(null);
+    try {
+      const res = await api.resetDemoScenario();
+      setInjectSuccess(
+        `Demo Scenario Reset to Seed 42: Train at ${res.current_station} &rarr; ${res.next_station}, delay: +${res.current_delay_minutes}m, speed: ${res.current_speed_kmh} km/h.`
+      );
+      await fetchTrainDetails(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to reset demo scenario";
+      setInjectError(msg);
+    } finally {
+      setInjecting(false);
+    }
+  };
+
+  const handleExecuteDemoAction = async (actionId: string) => {
+    setInjecting(true);
+    setInjectSuccess(null);
+    setInjectError(null);
+    try {
+      const res = await api.executeDemoAction(actionId);
+      setInjectSuccess(
+        `Demo Action '${res.action_name}' applied: Delay +${res.new_delay_minutes.toFixed(1)}m, Status: ${res.new_status}, Speed: ${res.speed_kmh.toFixed(1)} km/h.`
+      );
+      await fetchTrainDetails(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Failed to execute demo action ${actionId}`;
+      setInjectError(msg);
+    } finally {
+      setInjecting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="py-20 text-center space-y-3">
@@ -603,6 +640,56 @@ export default function TrainDetailPage({ params }: PageProps) {
               State and ML ETAs recalculate deterministically.
             </p>
           </div>
+
+          {/* Hackathon Demo Scenario Panel (Train 12302) */}
+          {train.train_number === "12302" && (
+            <div className="p-3.5 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-indigo-900 flex items-center space-x-1">
+                  <span>🎯</span>
+                  <span>Hackathon Demo Scenario (Seed 42)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetDemo}
+                  disabled={injecting}
+                  className="px-2 py-1 text-[11px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-300 rounded shadow-2xs transition-colors flex items-center space-x-1 disabled:opacity-50"
+                >
+                  <span>🔄</span>
+                  <span>Reset Demo</span>
+                </button>
+              </div>
+              <div className="text-[11px] text-slate-600">
+                1-Click Prepared Disruption Sequence:
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("signal_halt")}
+                  disabled={injecting}
+                  className="p-1.5 text-center text-[10px] font-bold bg-rose-100 hover:bg-rose-200 text-rose-800 rounded border border-rose-300 transition-colors disabled:opacity-50"
+                >
+                  🔴 1. Signal Halt (+15m)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("congestion")}
+                  disabled={injecting}
+                  className="p-1.5 text-center text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 rounded border border-amber-300 transition-colors disabled:opacity-50"
+                >
+                  🟠 2. Congestion (+10m)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDemoAction("speed_restriction")}
+                  disabled={injecting}
+                  className="p-1.5 text-center text-[10px] font-bold bg-yellow-100 hover:bg-yellow-200 text-yellow-900 rounded border border-yellow-300 transition-colors disabled:opacity-50"
+                >
+                  🟡 3. Speed Restr (+8m)
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Configurable Delay & Severity Controls */}
           <div className="grid grid-cols-2 gap-3 text-xs">

@@ -108,6 +108,10 @@ export interface TrainListItem {
   confidence_range: ConfidenceRange | null;
   delay_trend: number;
   delay_history: number[];
+  data_source?: string;
+  data_source_mode?: string;
+  is_fallback?: boolean;
+  last_updated?: string | null;
 }
 
 export interface TrainListResponse {
@@ -245,4 +249,88 @@ export interface HealthResponse {
   status: string;
   service: string;
   version: string;
+}
+
+export interface DataSourceConfigResponse {
+  configured_mode: string;
+  effective_mode?: string;
+  supported_modes: string[];
+  has_api_key: boolean;
+  fallback_to_simulator?: boolean;
+  cache_active?: boolean;
+  cache_ttl_seconds?: number;
+  cache?: {
+    ttl_seconds?: number;
+    cached_trains_count?: number;
+    cached_train_numbers?: string[];
+    hits?: number;
+    misses?: number;
+    stale_hits?: number;
+    hit_rate?: number;
+    is_rate_limited?: boolean;
+    rate_limit_remaining_seconds?: number;
+  };
+}
+
+export interface DemoActionInfo {
+  action_id: string;
+  step_number: number;
+  name: string;
+  event_type: string;
+  delay_minutes: number;
+  severity: string;
+  location: string;
+  reason: string;
+  description: string;
+  expected_status: string;
+  expected_speed_kmh?: number | null;
+}
+
+export interface DemoScenarioResponse {
+  status: string;
+  seed: number;
+  train_number: string;
+  train_name: string;
+  train_type: string;
+  current_station: string;
+  next_station: string;
+  distance_to_next_km: number;
+  current_delay_minutes: number;
+  current_speed_kmh: number;
+  segment_progress: number;
+  train_status: string;
+  scheduled_eta?: string | null;
+  baseline_eta?: string | null;
+  ml_eta?: string | null;
+  confidence_margin_minutes?: number | null;
+  active_events: Array<{
+    event_type: string;
+    delay_minutes: number;
+    severity: string;
+    metadata?: Record<string, unknown>;
+    timestamp?: string | null;
+  }>;
+  delay_history: number[];
+  upcoming_stations_count: number;
+  available_actions: DemoActionInfo[];
+  message: string;
+}
+
+export interface DemoActionResult {
+  status: string;
+  action_id: string;
+  action_name: string;
+  train_number: string;
+  previous_delay_minutes: number;
+  new_delay_minutes: number;
+  delay_delta_minutes: number;
+  previous_status: string;
+  new_status: string;
+  speed_kmh: number;
+  baseline_eta: string;
+  ml_eta: string;
+  confidence_margin_minutes: number;
+  target_station: string;
+  active_events_count: number;
+  message: string;
 }

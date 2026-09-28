@@ -1,7 +1,9 @@
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any, Union
 from fastapi import FastAPI, Depends, HTTPException, Query, Path
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, joinedload
@@ -26,6 +28,36 @@ from backend.ml.evaluate_model import (
     DEFAULT_METRICS_OUTPUT_PATH,
     DEFAULT_METADATA_PATH,
 )
+from backend.services.railway_api_client import (
+    sanitize_secret,
+    RailwayAPIError,
+    MissingApiKeyError,
+    AuthenticationError,
+    TrainNotFoundError,
+    RateLimitExceededError,
+    APITimeoutError,
+    MalformedResponseError,
+    ServiceUnavailableError,
+)
+from backend.services.data_source import (
+    DataSourceMode,
+    TrainStateProvider,
+    StateProviderResult,
+    get_configured_mode,
+)
+from backend.services.live_train_service import (
+    LiveTrainLookupService,
+    LiveTrainResult,
+    ConfidenceRangeDetails,
+)
+from backend.services.demo_scenario import (
+    DemoScenarioManager,
+    DemoScenarioResponse,
+    DemoActionResult,
+    DEMO_ACTIONS,
+    DEMO_TRAIN_NUMBER,
+)
+
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +172,26 @@ class TrainDetailResponse(BaseModel):
     delay_history: List[float] = Field(
         default_factory=list, description="Historical checkpoint delays in minutes"
     )
+    data_source_mode: Optional[str] = Field(
+        default="SIMULATOR", description="Effective telemetry data source mode ('SIMULATOR' or 'LIVE_API')"
+    )
+    is_fallback: bool = Field(
+        default=False, description="True if system performed a controlled fallback to SIMULATOR"
+    )
+    fallback_reason: Optional[str] = Field(
+        default=None, description="Sanitized rationale when fallback occurred"
+    )
+
+    # Freshness and cache metadata (Requirements 1, 3, 4)
+    last_updated: Optional[datetime] = Field(
+        default=None, description="Timestamp when telemetry was last observed/updated"
+    )
+    is_cached: bool = Field(
+        default=False, description="True if telemetry was served from in-process cache"
+    )
+    cache_age_seconds: Optional[float] = Field(
+        default=None, description="Age of cached telemetry in seconds"
+    )
 
 
 class SingleStationETAResponse(BaseModel):
@@ -162,12 +214,30 @@ class SingleStationETAResponse(BaseModel):
     ml_status: str = Field(default="AVAILABLE", description="Status of ML prediction: 'AVAILABLE' or 'UNAVAILABLE'")
     ml_error: Optional[str] = Field(default=None, description="Error details if ML prediction was unavailable")
 
+    # Data source provenance
+    data_source_mode: Optional[str] = Field(
+        default="SIMULATOR", description="Effective telemetry data source mode ('SIMULATOR' or 'LIVE_API')"
+    )
+    is_fallback: bool = Field(
+        default=False, description="True if system performed a controlled fallback to SIMULATOR"
+    )
+    fallback_reason: Optional[str] = Field(
+        default=None, description="Sanitized rationale when fallback occurred"
+    )
+
     # Optional fields for backward compatibility
     train_name: Optional[str] = Field(default=None, description="Name of the train")
     prediction: Optional[Dict[str, Any]] = Field(default=None, description="Baseline prediction details")
     features: Optional[Dict[str, Any]] = Field(default=None, description="Extracted 11 PRD features")
+    feature_provenance: Optional[Dict[str, str]] = Field(
+        default=None, description="Feature source categorization ('live data', 'historical data', 'simulator/default source')"
+    )
+    estimated_features: Optional[List[str]] = Field(
+        default=None, description="List of features using default or estimated values"
+    )
     segments_ahead: Optional[int] = Field(default=None, description="Number of segments ahead")
     distance_to_go_km: Optional[float] = Field(default=None, description="Distance remaining to target station in km")
+
 
 
 class StationArrivalItem(BaseModel):
@@ -291,7 +361,28 @@ class ModelMetricsResponse(BaseModel):
     disclaimer: Optional[str] = Field(default=None, description="Dataset synthetic disclaimer")
 
 
+class LiveTrainResponse(LiveTrainResult):
+    """Structured response for live train lookup."""
+    pass
+
+
+class LiveTrainErrorResponse(BaseModel):
+    """Structured error schema when live train data is unavailable."""
+    error: str = Field(description="Machine-readable error code")
+    message: str = Field(description="Human-readable error description")
+    detail: Optional[str] = Field(default=None, description="Sanitized diagnostic failure details")
+    train_number: str = Field(description="Requested train number")
+    simulator_mode_available: bool = Field(default=True, description="Indicates simulator fallback is available")
+    simulator_available: bool = Field(default=True, description="Alias indicating simulator availability")
+    simulator_url: Optional[str] = Field(default=None, description="URL to access train in simulator mode")
+    suggested_action: str = Field(
+        default="Simulator mode is available. Access /train/{train_number} to view simulated journey.",
+        description="Suggested action for user or client",
+    )
+
+
 # ---------------------------------------------------------------------------
+
 # Global Service Singletons & Dependency Injection
 # ---------------------------------------------------------------------------
 
@@ -368,9 +459,55 @@ def get_multi_station_service() -> MultiStationETAService:
     return multi_station_service
 
 
+state_provider_instance: Optional[TrainStateProvider] = None
+
+
+def get_state_provider() -> TrainStateProvider:
+    """Dependency provider for TrainStateProvider."""
+    global state_provider_instance
+    if state_provider_instance is None:
+        state_provider_instance = TrainStateProvider()
+    return state_provider_instance
+
+
+live_lookup_service_instance: Optional[LiveTrainLookupService] = None
+
+
+def get_live_lookup_service(
+    eta_service: MultiStationETAService = Depends(get_multi_station_service),
+) -> LiveTrainLookupService:
+    """Dependency provider for LiveTrainLookupService."""
+    global live_lookup_service_instance
+    if live_lookup_service_instance is None:
+        live_lookup_service_instance = LiveTrainLookupService(
+            feature_builder=feature_builder,
+            baseline_service=baseline_service,
+            multi_station_service=eta_service,
+        )
+    return live_lookup_service_instance
+
+
+demo_manager_instance: Optional[DemoScenarioManager] = None
+
+
+def get_demo_manager(
+    eta_service: MultiStationETAService = Depends(get_multi_station_service),
+) -> DemoScenarioManager:
+    """Dependency provider for DemoScenarioManager."""
+    global demo_manager_instance
+    if demo_manager_instance is None:
+        demo_manager_instance = DemoScenarioManager(
+            baseline_service=baseline_service,
+            multi_station_service=eta_service,
+        )
+    return demo_manager_instance
+
+
+
 def get_metrics_filepath() -> FilePath:
     """Returns the default path to the evaluation metrics JSON file."""
     return DEFAULT_METRICS_OUTPUT_PATH
+
 
 
 def get_metadata_filepath() -> FilePath:
@@ -414,10 +551,38 @@ def health_check():
     }
 
 
+@app.get(
+    "/system/data-source",
+    summary="Get current data source telemetry configuration",
+    description="Returns current configured telemetry data source mode and RailRadar key status (strictly masked).",
+)
+def get_data_source_config(
+    provider: TrainStateProvider = Depends(get_state_provider),
+):
+    mode = get_configured_mode()
+    has_key = bool(os.getenv("RAILRADAR_API_KEY"))
+    effective_mode = mode.value if (mode != DataSourceMode.LIVE_API or has_key) else DataSourceMode.SIMULATOR.value
+    cache_stats = provider.client.cache.stats() if provider.client and provider.client.cache else {}
+    ttl = provider.client.cache.ttl_seconds if provider.client and provider.client.cache else None
+    return {
+        "configured_mode": mode.value,
+        "effective_mode": effective_mode,
+        "supported_modes": [m.value for m in DataSourceMode],
+        "has_api_key": has_key,
+        "fallback_to_simulator": True,
+        "cache_active": bool(provider.client and provider.client.cache),
+        "cache_ttl_seconds": ttl,
+        "cache": cache_stats,
+    }
+
+
+
 @app.get("/trains")
 def list_trains(
+    data_source: Optional[str] = Query(None, description="Data source mode: SIMULATOR or LIVE_API"),
     db: Session = Depends(get_db),
     sim: TrainSimulator = Depends(get_active_simulator),
+    provider: TrainStateProvider = Depends(get_state_provider),
     eta_service: MultiStationETAService = Depends(get_multi_station_service),
 ):
     """Lists all configured trains with their current dynamic running state and next-station ETAs."""
@@ -443,26 +608,26 @@ def list_trains(
         current_station = None
         next_station = None
         current_delay = 0.0
+        effective_mode = "SIMULATOR"
+        is_fallback = False
 
-        if sim and train.train_number in sim.journeys:
-            journey = sim.journeys[train.train_number]
-            state = sim.get_state(train.train_number)
+        try:
+            p_res = provider.get_train_state(
+                train_number=train.train_number,
+                db=db,
+                sim=sim,
+                mode_override=data_source,
+                fallback_on_error=True,
+            )
+            state = p_res.state
             running_state = state.model_dump(mode="json")
             current_station = state.current_station_code
             next_station = state.next_station_code
             current_delay = state.current_delay_minutes
-
-            # Retrieve delay history
-            raw_history = getattr(journey, "delay_history", [current_delay])
-            delay_history = [round(float(x), 1) for x in raw_history] if raw_history else [round(current_delay, 1)]
-
-            # Calculate delay trend slope across last checkpoints
-            if len(delay_history) >= 3:
-                delay_trend = round((delay_history[-1] - delay_history[-3]) / 2.0, 2)
-            elif len(delay_history) == 2:
-                delay_trend = round(delay_history[-1] - delay_history[-2], 2)
-            else:
-                delay_trend = 0.0
+            delay_history = p_res.delay_history
+            delay_trend = p_res.delay_trend
+            effective_mode = p_res.effective_mode.value
+            is_fallback = p_res.is_fallback
 
             # Predict ETA to immediate next station
             if next_station:
@@ -477,6 +642,8 @@ def list_trains(
                     }
                 except Exception:
                     pass
+        except Exception:
+            pass
 
         result.append({
             "id": train.id,
@@ -493,9 +660,98 @@ def list_trains(
             "confidence_range": confidence_range,
             "delay_trend": delay_trend,
             "delay_history": delay_history,
+            "data_source_mode": effective_mode,
+            "data_source": getattr(state, "source", None) or effective_mode,
+            "is_fallback": is_fallback,
+            "last_updated": state.timestamp.isoformat() if state and state.timestamp else None,
         })
 
     return {"total": len(result), "trains": result}
+
+
+@app.get(
+    "/live/train/{train_number}",
+    response_model=LiveTrainResponse,
+    summary="Live train lookup with dynamic Baseline and ML ETA",
+    description=(
+        "Executes live train lookup flow: RailRadar live API -> normalized TrainRunningState "
+        "-> FeatureBuilder -> Baseline ETA + ML ETA for upcoming station. "
+        "If live telemetry is unavailable, returns a structured error indicating simulator mode availability."
+    ),
+    responses={
+        200: {"model": LiveTrainResponse, "description": "Live train state and dynamic predicted ETAs"},
+        404: {"model": LiveTrainErrorResponse, "description": "Train not found in live telemetry"},
+        503: {"model": LiveTrainErrorResponse, "description": "Live railway API unavailable (simulator mode available)"},
+    },
+)
+def get_live_train_lookup(
+    train_number: str = Path(..., description="Unique train identifier/number (e.g. 12302)"),
+    db: Session = Depends(get_db),
+    lookup_service: LiveTrainLookupService = Depends(get_live_lookup_service),
+):
+    """
+    Live train lookup endpoint.
+    Retrieves real-time telemetry from RailRadar, normalizes into TrainRunningState,
+    builds the feature vector, and calculates Baseline ETA and ML ETA for the next upcoming station.
+    If live data is unavailable, returns a structured error indicating simulator mode availability without crashing.
+    """
+    clean_number = str(train_number).strip()
+    try:
+        result = lookup_service.lookup_live_train(clean_number, db=db)
+        return result
+    except TrainNotFoundError as exc:
+        clean_msg = sanitize_secret(str(exc))
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "TRAIN_NOT_FOUND",
+                "message": f"Train '{clean_number}' not found in live railway API. Simulator mode is available.",
+                "detail": clean_msg,
+                "train_number": clean_number,
+                "simulator_mode_available": True,
+                "simulator_available": True,
+                "simulator_url": f"/train/{clean_number}",
+                "suggested_action": f"Train '{clean_number}' is not tracked in live API. Switch to simulator mode at /train/{clean_number}.",
+            },
+        )
+    except (
+        APITimeoutError,
+        AuthenticationError,
+        RateLimitExceededError,
+        ServiceUnavailableError,
+        MalformedResponseError,
+        MissingApiKeyError,
+        RailwayAPIError,
+    ) as exc:
+        clean_msg = sanitize_secret(str(exc))
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "LIVE_DATA_UNAVAILABLE",
+                "message": f"Live railway data is currently unavailable for train '{clean_number}'. Simulator mode is available.",
+                "detail": clean_msg,
+                "train_number": clean_number,
+                "simulator_mode_available": True,
+                "simulator_available": True,
+                "simulator_url": f"/train/{clean_number}",
+                "suggested_action": f"Live railway telemetry is unavailable. Simulator mode is available as a fallback via GET /train/{clean_number} or GET /train/{clean_number}?data_source=SIMULATOR.",
+            },
+        )
+    except Exception as exc:
+        clean_msg = sanitize_secret(str(exc))
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "LIVE_LOOKUP_ERROR",
+                "message": f"An error occurred while fetching live telemetry for train '{clean_number}'. Simulator mode is available.",
+                "detail": clean_msg,
+                "train_number": clean_number,
+                "simulator_mode_available": True,
+                "simulator_available": True,
+                "simulator_url": f"/train/{clean_number}",
+                "suggested_action": f"Simulator mode is available at /train/{clean_number}.",
+            },
+        )
 
 
 @app.get(
@@ -510,8 +766,10 @@ def list_trains(
 )
 def get_train_details(
     train_id: str = Path(..., description="Train number (e.g. 12302) or integer ID"),
+    data_source: Optional[str] = Query(None, description="Data source mode: SIMULATOR or LIVE_API"),
     db: Session = Depends(get_db),
     sim: TrainSimulator = Depends(get_active_simulator),
+    provider: TrainStateProvider = Depends(get_state_provider),
     eta_service: MultiStationETAService = Depends(get_multi_station_service),
 ):
     """
@@ -521,38 +779,29 @@ def get_train_details(
     if not train:
         raise HTTPException(status_code=404, detail=f"Train '{train_id}' not found.")
 
-    # 1. Running state and operational events from active simulator
-    running_state: Optional[TrainRunningState] = None
+    # 1. Running state via provider (SIMULATOR or LIVE_API with fallback)
+    provider_result = provider.get_train_state(
+        train_number=train.train_number,
+        db=db,
+        sim=sim,
+        mode_override=data_source,
+        fallback_on_error=True,
+    )
+    running_state = provider_result.state
     active_events: List[Dict[str, Any]] = []
-    delay_history: List[float] = []
-    delay_trend: float = 0.0
+    if provider_result.active_events:
+        for evt in provider_result.active_events:
+            evt_type = evt.event_type.value if hasattr(evt.event_type, "value") else str(evt.event_type)
+            active_events.append({
+                "event_type": evt_type,
+                "delay_minutes": float(evt.delay_minutes),
+                "severity": getattr(evt, "severity", "MEDIUM"),
+                "metadata": getattr(evt, "metadata", {}) or {},
+                "timestamp": evt.created_at.isoformat() if hasattr(evt, "created_at") and evt.created_at else None,
+            })
 
-    if sim:
-        if train.train_number not in sim.journeys:
-            sim.load_from_db(db, train_numbers=[train.train_number])
-        if train.train_number in sim.journeys:
-            journey = sim.journeys[train.train_number]
-            running_state = sim.get_state(train.train_number)
-
-            if hasattr(journey, "active_events") and journey.active_events:
-                for evt in journey.active_events:
-                    evt_type = evt.event_type.value if hasattr(evt.event_type, "value") else str(evt.event_type)
-                    active_events.append({
-                        "event_type": evt_type,
-                        "delay_minutes": float(evt.delay_minutes),
-                        "severity": getattr(evt, "severity", "MEDIUM"),
-                        "metadata": getattr(evt, "metadata", {}) or {},
-                        "timestamp": evt.created_at.isoformat() if hasattr(evt, "created_at") and evt.created_at else None,
-                    })
-
-            raw_hist = getattr(journey, "delay_history", [running_state.current_delay_minutes])
-            delay_history = [round(float(x), 1) for x in raw_hist] if raw_hist else [round(running_state.current_delay_minutes, 1)]
-            if len(delay_history) >= 3:
-                delay_trend = round((delay_history[-1] - delay_history[-3]) / 2.0, 2)
-            elif len(delay_history) == 2:
-                delay_trend = round(delay_history[-1] - delay_history[-2], 2)
-            else:
-                delay_trend = 0.0
+    delay_history = provider_result.delay_history
+    delay_trend = provider_result.delay_trend
 
     # 2. Ordered route stations
     route_stations: List[RouteStationInfo] = []
@@ -636,6 +885,19 @@ def get_train_details(
     confidence_range = next_stop_eta.confidence_range if next_stop_eta else None
     segment_predictions = upcoming_stations[-1].segment_predictions if upcoming_stations else []
 
+    is_cached_resp = False
+    cache_age_resp = None
+    if provider.client and getattr(provider.client, "cache", None):
+        try:
+            from backend.services.cache import LiveTrainCache, CacheEntry
+            if isinstance(provider.client.cache, LiveTrainCache):
+                c_entry = provider.client.cache.get_entry(train.train_number)
+                if isinstance(c_entry, CacheEntry):
+                    is_cached_resp = (c_entry.hit_count > 0)
+                    cache_age_resp = c_entry.age_seconds
+        except Exception:
+            pass
+
     return TrainDetailResponse(
         id=train.id,
         train_number=train.train_number,
@@ -657,6 +919,12 @@ def get_train_details(
         active_events=active_events,
         delay_trend=delay_trend,
         delay_history=delay_history,
+        data_source_mode=provider_result.effective_mode.value,
+        is_fallback=provider_result.is_fallback,
+        fallback_reason=provider_result.fallback_reason,
+        last_updated=current_timestamp,
+        is_cached=is_cached_resp,
+        cache_age_seconds=cache_age_resp,
     )
 
 
@@ -673,8 +941,10 @@ def get_train_details(
 def get_train_station_eta(
     train_id: str = Path(..., description="Train number or ID"),
     station_code: str = Path(..., description="Target upcoming station code (e.g. CNB, PRYJ)"),
+    data_source: Optional[str] = Query(None, description="Data source mode: SIMULATOR or LIVE_API"),
     db: Session = Depends(get_db),
     sim: TrainSimulator = Depends(get_active_simulator),
+    provider: TrainStateProvider = Depends(get_state_provider),
     eta_service: MultiStationETAService = Depends(get_multi_station_service),
 ):
     """
@@ -686,14 +956,22 @@ def get_train_station_eta(
 
     target_code = station_code.upper().strip()
 
-    # 1. Get active train running state from simulator
-    if sim and train.train_number in sim.journeys:
-        train_state = sim.get_state(train.train_number)
-        active_events = sim.journeys[train.train_number].active_events
-    else:
+    # 1. Get train running state via provider (SIMULATOR or LIVE_API with fallback)
+    try:
+        provider_result = provider.get_train_state(
+            train_number=train.train_number,
+            db=db,
+            sim=sim,
+            mode_override=data_source,
+            fallback_on_error=True,
+        )
+        train_state = provider_result.state
+        active_events = provider_result.active_events
+    except Exception as exc:
+        clean_msg = sanitize_secret(str(exc))
         raise HTTPException(
             status_code=400,
-            detail=f"Train '{train.train_number}' is not currently active in the simulator.",
+            detail=f"Unable to resolve state for train '{train.train_number}': {clean_msg}",
         )
 
     # 2. Ordered route stops
@@ -722,6 +1000,8 @@ def get_train_station_eta(
 
     # 4. Extract 11 ML features (for backward compatibility / inspection)
     features_dict = None
+    feature_prov_dict = None
+    est_features_list = None
     try:
         features = feature_builder.build(
             train_state=train_state,
@@ -730,6 +1010,8 @@ def get_train_station_eta(
             active_events=active_events,
         )
         features_dict = features.to_model_input_dict()
+        feature_prov_dict = features.feature_provenance
+        est_features_list = features.estimated_features
     except Exception:
         pass
 
@@ -789,8 +1071,13 @@ def get_train_station_eta(
         ml_error=ml_error,
         prediction=baseline_dict,
         features=features_dict,
+        feature_provenance=feature_prov_dict,
+        estimated_features=est_features_list,
         segments_ahead=segments_ahead,
         distance_to_go_km=distance_to_go_km,
+        data_source_mode=provider_result.effective_mode.value,
+        is_fallback=provider_result.is_fallback,
+        fallback_reason=provider_result.fallback_reason,
     )
 
 
@@ -1103,5 +1390,74 @@ def get_model_metrics(
         metadata_path=metadata_path,
     )
     return ModelMetricsResponse(**metrics_data)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic Hackathon Demo Mode Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/demo/reset",
+    response_model=DemoScenarioResponse,
+    summary="Reset deterministic hackathon demo scenario (Seed 42)",
+    description=(
+        "Resets flagship train 12302 (Howrah Rajdhani Express) to the exact predefined baseline state "
+        "(departed CNB bound for PRYJ, +2.0m initial headway delay, 110 km/h) with fixed random seed 42. "
+        "Clears all active disruptions and recalculates Baseline and ML ETAs deterministically."
+    ),
+)
+def reset_demo_scenario(
+    db: Session = Depends(get_db),
+    sim: TrainSimulator = Depends(get_active_simulator),
+    demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
+):
+    try:
+        return demo_mgr.reset_scenario(db, sim)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to reset demo scenario: {str(exc)}")
+
+
+@app.get(
+    "/demo/scenario",
+    response_model=DemoScenarioResponse,
+    summary="Get deterministic hackathon demo scenario state",
+    description="Returns current scenario status, train state, active events, and available demo actions.",
+)
+def get_demo_scenario(
+    db: Session = Depends(get_db),
+    sim: TrainSimulator = Depends(get_active_simulator),
+    demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
+):
+    try:
+        return demo_mgr.get_scenario(db, sim)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve demo scenario: {str(exc)}")
+
+
+@app.post(
+    "/demo/action/{action_id}",
+    response_model=DemoActionResult,
+    summary="Execute prepared hackathon demo action",
+    description=(
+        "Executes one of the 3 prepared demo actions deterministically (seed 42): "
+        "1. signal_halt (+15m, speed=0 km/h, status=HALTED) "
+        "2. congestion (+10m, speed=49.5 km/h, status=RUNNING) "
+        "3. speed_restriction (+8m, speed=30.0 km/h, status=RUNNING). "
+        "State and ML ETAs recalculate and propagate automatically across all endpoints."
+    ),
+)
+def execute_demo_action(
+    action_id: str = Path(..., description="Action ID: signal_halt, congestion, or speed_restriction (or 1, 2, 3)"),
+    db: Session = Depends(get_db),
+    sim: TrainSimulator = Depends(get_active_simulator),
+    demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
+):
+    try:
+        return demo_mgr.execute_action(action_id, db, sim)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to execute demo action: {str(exc)}")
+
 
 

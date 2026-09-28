@@ -8,11 +8,30 @@ from backend.services.railway_api_client import (
     RateLimitExceededError,
     APITimeoutError,
     MalformedResponseError,
+    ServiceUnavailableError,
     NormalizedLiveTrain,
+    sanitize_secret,
+)
+from backend.services.data_source import (
+    DataSourceMode,
+    TrainStateProvider,
+    StateProviderResult,
+    get_configured_mode,
 )
 from backend.services.baseline_eta import (
     BaselineETAService,
     BaselineETAPrediction,
+)
+from backend.services.live_train_service import (
+    LiveTrainLookupService,
+    LiveTrainResult,
+    ConfidenceRangeDetails,
+)
+from backend.services.cache import (
+    LiveTrainCache,
+    CacheEntry,
+    get_shared_cache,
+    get_configured_cache_ttl,
 )
 
 __all__ = [
@@ -25,8 +44,21 @@ __all__ = [
     "RateLimitExceededError",
     "APITimeoutError",
     "MalformedResponseError",
+    "ServiceUnavailableError",
     "NormalizedLiveTrain",
+    "sanitize_secret",
+    "DataSourceMode",
+    "TrainStateProvider",
+    "StateProviderResult",
+    "get_configured_mode",
     "BaselineETAService",
     "BaselineETAPrediction",
+    "LiveTrainLookupService",
+    "LiveTrainResult",
+    "ConfidenceRangeDetails",
+    "LiveTrainCache",
+    "CacheEntry",
+    "get_shared_cache",
+    "get_configured_cache_ttl",
 ]
 

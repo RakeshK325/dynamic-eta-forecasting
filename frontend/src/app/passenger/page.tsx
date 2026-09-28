@@ -22,6 +22,7 @@ function PassengerViewContent() {
 
   const [loadingList, setLoadingList] = useState<boolean>(true);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
 
@@ -43,9 +44,10 @@ function PassengerViewContent() {
 
   // 2. Fetch train details for the selected train
   const fetchSelectedTrain = useCallback(
-    async (trainNum: string) => {
+    async (trainNum: string, isSilent = false) => {
       if (!trainNum.trim()) return;
-      setLoadingDetails(true);
+      if (!isSilent) setLoadingDetails(true);
+      else setIsRefreshing(true);
       setError(null);
       try {
         const data = await api.getTrainDetails(trainNum.trim());
@@ -68,10 +70,13 @@ function PassengerViewContent() {
           err instanceof Error
             ? err.message
             : "Unable to retrieve train running state";
-        setError(msg);
-        setTrainDetails(null);
+        if (!isSilent) {
+          setError(msg);
+          setTrainDetails(null);
+        }
       } finally {
-        setLoadingDetails(false);
+        if (!isSilent) setLoadingDetails(false);
+        else setIsRefreshing(false);
       }
     },
     [selectedStationCode]
@@ -81,6 +86,15 @@ function PassengerViewContent() {
     if (selectedTrainNumber) {
       fetchSelectedTrain(selectedTrainNumber);
     }
+  }, [selectedTrainNumber, fetchSelectedTrain]);
+
+  // 3. Periodic Auto-refresh every 10 seconds for real-time passenger sync
+  useEffect(() => {
+    if (!selectedTrainNumber) return;
+    const interval = setInterval(() => {
+      fetchSelectedTrain(selectedTrainNumber, true);
+    }, 10000);
+    return () => clearInterval(interval);
   }, [selectedTrainNumber, fetchSelectedTrain]);
 
   // Filtered train search options
@@ -131,9 +145,30 @@ function PassengerViewContent() {
         >
           &larr; Back to Control Room
         </Link>
-        <span className="text-[11px] text-slate-400 font-mono">
-          Updated {formatTime(lastRefreshed.toISOString())}
-        </span>
+        <div className="flex items-center space-x-2">
+          {isRefreshing ? (
+            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 animate-pulse border border-blue-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+              <span>Updating...</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>Live Sync (10s)</span>
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => fetchSelectedTrain(selectedTrainNumber)}
+            className="text-[11px] text-slate-500 hover:text-slate-800 border border-slate-200 rounded px-1.5 py-0.5 bg-white hover:bg-slate-50 transition-colors"
+            title="Refresh now"
+          >
+            ↻
+          </button>
+          <span className="text-[11px] text-slate-400 font-mono">
+            {formatTime(lastRefreshed.toISOString())}
+          </span>
+        </div>
       </div>
 
       {/* Hero Title */}

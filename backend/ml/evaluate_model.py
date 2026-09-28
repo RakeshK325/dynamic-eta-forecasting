@@ -30,7 +30,6 @@ from backend.features.feature_builder import FeatureBuilder
 from backend.ml.predictor import ETAPredictor
 from backend.ml.dataset_generator import SyntheticDatasetGenerator
 from backend.ml.train_model import split_by_journey, DEFAULT_DATASET_PATH
-from backend.simulator.journey import SimulatedJourney
 from backend.simulator.events import SimulationEvent, EventType
 
 DEFAULT_METRICS_OUTPUT_PATH = (
@@ -264,6 +263,7 @@ class ModelEvaluator:
         """
         test_j_set = set(test_journey_ids)
         trains_data = self.gen._load_trains_and_routes()
+        from backend.simulator.journey import SimulatedJourney
 
         rng = random.Random(self.random_seed)
         start_date = base_date or date(2026, 10, 1)

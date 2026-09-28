@@ -186,9 +186,10 @@ def seed_data(db: Session = None) -> dict:
 
         # 3. Seed sample active journeys for simulator baseline testing
         # Journey 1 on Route 1 (NDLS-HWH, Train 12302)
+        utc_today = datetime.now(timezone.utc).date()
         j1 = Journey(
             train_id=created_train_ids[0],
-            journey_date=date.today(),
+            journey_date=utc_today,
             current_station_id=station_map["CNB"].id,
             current_sequence=2,
             current_delay_minutes=14.0,
@@ -216,7 +217,7 @@ def seed_data(db: Session = None) -> dict:
         # Journey 2 on Route 2 (NDLS-MMCT, Train 12952)
         j2 = Journey(
             train_id=created_train_ids[3],
-            journey_date=date.today(),
+            journey_date=utc_today,
             current_station_id=station_map["KOTA"].id,
             current_sequence=3,
             current_delay_minutes=6.0,

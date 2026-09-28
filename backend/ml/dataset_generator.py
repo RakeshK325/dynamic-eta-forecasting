@@ -22,7 +22,6 @@ from backend.database.init_db import init_db
 from backend.database.models import Train, Route, RouteStation, Station
 from backend.services.schemas import TrainRunningState
 from backend.simulator.events import EventType, SimulationEvent
-from backend.simulator.journey import SimulatedJourney, StationStop
 from backend.features.feature_builder import FeatureBuilder, TrainFeatures
 
 DATA_DISCLAIMER = (
@@ -83,6 +82,7 @@ class SyntheticDatasetGenerator:
         """
         # Re-seed RNG for deterministic reproducibility
         self.rng = random.Random(self.seed)
+        from backend.simulator.journey import SimulatedJourney
 
         start_date = base_date or date(2026, 10, 1)
         trains_data = self._load_trains_and_routes()
@@ -351,6 +351,8 @@ class SyntheticDatasetGenerator:
         own_session = self.db is None
 
         try:
+            from backend.simulator.journey import StationStop
+
             trains = (
                 session.query(Train)
                 .options(

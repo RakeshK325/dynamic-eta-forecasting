@@ -48,6 +48,22 @@ class MalformedResponseError(RailwayAPIError):
     pass
 
 
+class ServiceUnavailableError(RailwayAPIError):
+    """Raised when RailRadar server is temporarily unavailable (HTTP 503)."""
+    pass
+
+
+def sanitize_secret(text: str, secret: Optional[str] = None) -> str:
+    """Scrubs any occurrence of API key or secret token from strings, logs, and error messages."""
+    if not text:
+        return ""
+    key = secret or os.getenv("RAILRADAR_API_KEY")
+    if key and len(key.strip()) > 2:
+        clean_key = key.strip()
+        text = text.replace(clean_key, "***MASKED_API_KEY***")
+    return text
+
+
 # Backward compatibility alias
 NormalizedLiveTrain = TrainRunningState
 
@@ -59,16 +75,30 @@ class RailRadarClient:
     """
 
     DEFAULT_BASE_URL = "https://api.railradar.in"
+    cache: Optional[Any] = None
+    enable_cache: bool = True
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout_seconds: float = 10.0,
+        cache: Optional[Any] = None,
+        cache_ttl_seconds: Optional[int] = None,
+        enable_cache: bool = True,
     ):
         self.api_key = api_key or os.getenv("RAILRADAR_API_KEY")
         self.base_url = (base_url or os.getenv("RAILRADAR_BASE_URL") or self.DEFAULT_BASE_URL).rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.enable_cache = enable_cache
+
+        if not enable_cache:
+            self.cache = None
+        elif cache is not None:
+            self.cache = cache
+        else:
+            from backend.services.cache import LiveTrainCache
+            self.cache = LiveTrainCache(ttl_seconds=cache_ttl_seconds)
 
     def _ensure_api_key(self) -> str:
         if not self.api_key or not self.api_key.strip():
@@ -82,13 +112,32 @@ class RailRadarClient:
         self,
         train_number: str,
         debug_output_file: Optional[Path] = None,
+        bypass_cache: bool = False,
     ) -> TrainRunningState:
         """
         Calls GET /v1/trains/{number}/live and normalizes the payload into TrainRunningState.
+        Uses in-process cache with configurable TTL to prevent redundant requests.
+        Gracefully returns stale cache on HTTP 429 rate limit.
         Optionally writes raw response JSON to debug_output_file if enabled.
         """
-        key = self._ensure_api_key()
         cleaned_number = str(train_number).strip()
+
+        # 1. In-process cache lookup (Requirements 1 & 2)
+        if self.enable_cache and self.cache and not bypass_cache:
+            cached_state, entry = self.cache.get(cleaned_number, allow_stale=False)
+            if cached_state is not None:
+                return cached_state
+
+            # If currently in rate limit cooldown, serve stale data if available
+            if self.cache.is_rate_limited():
+                stale_state, entry = self.cache.get(cleaned_number, allow_stale=True)
+                if stale_state is not None:
+                    return stale_state
+                raise RateLimitExceededError(
+                    f"Rate limit exceeded (HTTP 429): In cooldown period for next {self.cache.rate_limit_remaining_seconds()}s."
+                )
+
+        key = self._ensure_api_key()
         url = f"{self.base_url}/v1/trains/{cleaned_number}/live"
 
         headers = {
@@ -106,7 +155,8 @@ class RailRadarClient:
                 f"Connection to RailRadar API timed out after {self.timeout_seconds}s for train {cleaned_number}."
             ) from exc
         except httpx.RequestError as exc:
-            raise RailwayAPIError(f"Network error while calling RailRadar API: {exc}") from exc
+            clean_err = sanitize_secret(str(exc), key)
+            raise RailwayAPIError(f"Network error while calling RailRadar API: {clean_err}") from exc
 
         # Handle HTTP status codes
         if response.status_code == 401:
@@ -118,31 +168,52 @@ class RailRadarClient:
                 f"Train not found (HTTP 404): No live tracking data found for train number '{cleaned_number}'."
             )
         elif response.status_code == 429:
+            # Requirement 6: Handle API 429 gracefully via stale-on-error
+            if self.enable_cache and self.cache:
+                self.cache.mark_rate_limited()
+                stale_state, entry = self.cache.get(cleaned_number, allow_stale=True)
+                if stale_state is not None:
+                    return stale_state
             raise RateLimitExceededError(
                 "Rate limit exceeded (HTTP 429): Quota limit reached on RailRadar API. Please wait before retrying."
             )
+        elif response.status_code == 503:
+            raise ServiceUnavailableError(
+                "RailRadar service temporarily unavailable (HTTP 503): The live railway server is under maintenance or overloaded."
+            )
         elif response.status_code >= 400:
+            clean_text = sanitize_secret(response.text[:200], key)
             raise RailwayAPIError(
-                f"RailRadar API error (HTTP {response.status_code}): {response.text}"
+                f"RailRadar API error (HTTP {response.status_code}): {clean_text}"
             )
 
         # Parse JSON
         try:
             raw_data = response.json()
         except Exception as exc:
+            clean_text = sanitize_secret(response.text[:200], key)
             raise MalformedResponseError(
-                f"Malformed JSON response received from {url}: {response.text[:200]}"
+                f"Malformed JSON response received from {url}: {clean_text}"
             ) from exc
 
         # Write raw debug dump if requested
         if debug_output_file:
-            debug_path = Path(debug_output_file)
-            debug_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(debug_path, "w", encoding="utf-8") as f:
-                json.dump(raw_data, f, indent=2, ensure_ascii=False)
-            print(f"[Debug] Raw response successfully saved to: {debug_path}")
+            try:
+                debug_path = Path(debug_output_file)
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    json.dump(raw_data, f, indent=2)
+            except Exception as e:
+                print(f"[RailRadarClient] Failed to save debug dump to {debug_output_file}: {e}")
 
-        return self.normalize_payload(raw_data, fallback_train_number=cleaned_number)
+        # Normalize into TrainRunningState
+        normalized_state = self.normalize_payload(raw_data, fallback_train_number=cleaned_number)
+
+        # Store in cache (Requirement 1 & 2)
+        if self.enable_cache and self.cache:
+            self.cache.set(cleaned_number, normalized_state, raw_payload=raw_data)
+
+        return normalized_state
 
     def normalize_payload(self, data: Dict[str, Any], fallback_train_number: str) -> TrainRunningState:
         """
@@ -235,6 +306,8 @@ class RailRadarClient:
             or payload.get("previous_station")
             or payload.get("lastStation")
             or payload.get("last_station")
+            or payload.get("previousHalt")
+            or payload.get("previous_halt")
         )
         if isinstance(prev_loc, dict):
             previous_station_code = (
@@ -270,9 +343,18 @@ class RailRadarClient:
             raw_nxt_dist = payload.get("next_station_distance_km")
 
         next_station_distance_km = None
+        curr_dist_origin = (
+            curr_loc.get("distanceFromOriginKm")
+            if isinstance(curr_loc, dict)
+            else payload.get("distance_from_source_km")
+        )
         if raw_nxt_dist is not None:
             try:
-                next_station_distance_km = float(raw_nxt_dist)
+                dist_val = float(raw_nxt_dist)
+                if curr_dist_origin is not None and dist_val > float(curr_dist_origin):
+                    next_station_distance_km = round(dist_val - float(curr_dist_origin), 2)
+                else:
+                    next_station_distance_km = round(dist_val, 2)
             except (TypeError, ValueError):
                 next_station_distance_km = None
 
