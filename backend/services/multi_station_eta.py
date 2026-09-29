@@ -28,10 +28,9 @@ and is NOT a statistically validated quantile or conformal prediction interval.
 from datetime import datetime, date, time, timedelta, timezone
 from typing import List, Dict, Optional, Any, Tuple
 import math
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, joinedload
-
-from backend.database.models import Train, Route, RouteStation, Station
+from backend.database.models import Train, Route, RouteStation
 from backend.services.schemas import TrainRunningState
 from backend.services.baseline_eta import BaselineETAService, BaselineETAPrediction
 from backend.features.feature_builder import FeatureBuilder, compute_cumulative_schedule_minutes
@@ -45,16 +44,61 @@ MAX_PERMISSIBLE_SPEED_KMH = 130.0       # Physical kinematic ceiling guard
 class SegmentPrediction(BaseModel):
     """Granular prediction for a single inter-station route segment."""
     segment_index: int = Field(description="1-based index of this segment along the upcoming path")
+    segment_order: Optional[int] = Field(default=None, description="Alias for segment_index for frontend compatibility")
     from_station_code: str = Field(description="Departure station code for this segment")
     to_station_code: str = Field(description="Arrival station code for this segment")
     to_station_name: Optional[str] = Field(default=None, description="Arrival station name")
     segment_distance_km: float = Field(description="Distance of this segment in km")
+    distance_km: Optional[float] = Field(default=None, description="Alias for segment_distance_km for frontend compatibility")
     scheduled_transit_minutes: float = Field(description="Timetable scheduled travel time for this segment")
+    scheduled_minutes: Optional[float] = Field(default=None, description="Alias for scheduled_transit_minutes for frontend compatibility")
+    baseline_transit_minutes: Optional[float] = Field(default=None, description="Baseline heuristic transit time in minutes")
+    baseline_minutes: Optional[float] = Field(default=None, description="Alias for baseline_transit_minutes for frontend compatibility")
     predicted_transit_minutes: float = Field(description="XGBoost predicted travel minutes for this segment")
+    predicted_minutes: Optional[float] = Field(default=None, description="Alias for predicted_transit_minutes for frontend compatibility")
     scheduled_dwell_minutes: float = Field(description="Scheduled stop/dwell time at arrival station in minutes")
     cumulative_transit_minutes: float = Field(description="Cumulative travel minutes from observation checkpoint")
     predicted_arrival_time: datetime = Field(description="Predicted arrival datetime at to_station")
     predicted_departure_time: datetime = Field(description="Predicted departure datetime from to_station")
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Distance aliases
+            if "segment_distance_km" in data and "distance_km" not in data:
+                data["distance_km"] = data["segment_distance_km"]
+            elif "distance_km" in data and "segment_distance_km" not in data:
+                data["segment_distance_km"] = data["distance_km"]
+
+            # Order / index aliases
+            if "segment_index" in data and "segment_order" not in data:
+                data["segment_order"] = data["segment_index"]
+            elif "segment_order" in data and "segment_index" not in data:
+                data["segment_index"] = data["segment_order"]
+
+            # Scheduled transit minutes aliases
+            if "scheduled_transit_minutes" in data and "scheduled_minutes" not in data:
+                data["scheduled_minutes"] = data["scheduled_transit_minutes"]
+            elif "scheduled_minutes" in data and "scheduled_transit_minutes" not in data:
+                data["scheduled_transit_minutes"] = data["scheduled_minutes"]
+
+            # Predicted transit minutes aliases
+            if "predicted_transit_minutes" in data and "predicted_minutes" not in data:
+                data["predicted_minutes"] = data["predicted_transit_minutes"]
+            elif "predicted_minutes" in data and "predicted_transit_minutes" not in data:
+                data["predicted_transit_minutes"] = data["predicted_minutes"]
+
+            # Baseline transit minutes aliases
+            if "baseline_transit_minutes" in data and "baseline_minutes" not in data:
+                data["baseline_minutes"] = data["baseline_transit_minutes"]
+            elif "baseline_minutes" in data and "baseline_transit_minutes" not in data:
+                data["baseline_transit_minutes"] = data["baseline_minutes"]
+            elif "baseline_transit_minutes" not in data and "baseline_minutes" not in data:
+                sched = data.get("scheduled_transit_minutes", data.get("scheduled_minutes", 0.0))
+                data["baseline_transit_minutes"] = sched
+                data["baseline_minutes"] = sched
+        return data
 
 
 class StationETAPrediction(BaseModel):
@@ -268,12 +312,18 @@ class MultiStationETAService:
             # Record this segment's prediction
             seg_record = SegmentPrediction(
                 segment_index=segments_ahead,
+                segment_order=segments_ahead,
                 from_station_code=from_code,
                 to_station_code=to_code,
                 to_station_name=to_name,
                 segment_distance_km=round(seg_distance, 2),
+                distance_km=round(seg_distance, 2),
                 scheduled_transit_minutes=round(scheduled_segment_min, 1),
+                scheduled_minutes=round(scheduled_segment_min, 1),
+                baseline_transit_minutes=round(scheduled_segment_min, 1),
+                baseline_minutes=round(scheduled_segment_min, 1),
                 predicted_transit_minutes=round(pred_seg_minutes, 1),
+                predicted_minutes=round(pred_seg_minutes, 1),
                 scheduled_dwell_minutes=round(scheduled_dwell, 1),
                 cumulative_transit_minutes=round(accumulated_transit_minutes, 1),
                 predicted_arrival_time=predicted_arrival_dt,

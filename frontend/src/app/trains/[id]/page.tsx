@@ -636,7 +636,7 @@ export default function TrainDetailPage({ params }: PageProps) {
                       {evt.event_type}
                     </span>
                     <span className="text-xs font-bold text-rose-700">
-                      +{evt.delay_minutes.toFixed(0)} min delay
+                      +{(evt.delay_minutes ?? 0).toFixed(0)} min delay
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-600">
@@ -929,7 +929,7 @@ export default function TrainDetailPage({ params }: PageProps) {
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-xs text-slate-600 font-mono">
-                        {stn.distance_to_go_km.toFixed(1)} km
+                        {(stn.distance_to_go_km ?? 0).toFixed(1)} km
                         <span className="text-slate-400 block text-[11px]">
                           +{stn.segments_ahead} seg ahead
                         </span>
@@ -1010,28 +1010,41 @@ export default function TrainDetailPage({ params }: PageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {train.segment_predictions.map((seg) => (
-                  <tr key={seg.segment_order} className="hover:bg-slate-50/80">
-                    <td className="px-4 py-3 text-xs text-slate-400 font-mono">
-                      Segment #{seg.segment_order}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">
-                      {seg.from_station_code} &rarr; {seg.to_station_code}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600 font-mono">
-                      {seg.distance_km.toFixed(1)} km
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600 font-mono">
-                      {seg.scheduled_minutes.toFixed(1)} min
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-700 font-mono">
-                      {seg.baseline_minutes.toFixed(1)} min
-                    </td>
-                    <td className="px-4 py-3 text-xs font-bold text-blue-700 font-mono bg-blue-50/30">
-                      {seg.predicted_minutes.toFixed(1)} min
-                    </td>
-                  </tr>
-                ))}
+                {train.segment_predictions.map((seg, idx) => {
+                  const segOrder = seg.segment_index ?? seg.segment_order ?? idx + 1;
+                  const distKm = seg.segment_distance_km ?? seg.distance_km ?? 0;
+                  const schedMin = seg.scheduled_transit_minutes ?? seg.scheduled_minutes ?? 0;
+                  const baseMin = seg.baseline_transit_minutes ?? seg.baseline_minutes ?? schedMin;
+                  const predMin = seg.predicted_transit_minutes ?? seg.predicted_minutes ?? 0;
+
+                  return (
+                    <tr key={segOrder} className="hover:bg-slate-50/80">
+                      <td className="px-4 py-3 text-xs text-slate-400 font-mono">
+                        Segment #{segOrder}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">
+                        {seg.from_station_code} &rarr; {seg.to_station_code}
+                        {seg.to_station_name && (
+                          <span className="block text-[11px] font-normal text-slate-400">
+                            {seg.to_station_name}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                        {distKm.toFixed(1)} km
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                        {schedMin.toFixed(1)} min
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-700 font-mono">
+                        {baseMin.toFixed(1)} min
+                      </td>
+                      <td className="px-4 py-3 text-xs font-bold text-blue-700 font-mono bg-blue-50/30">
+                        {predMin.toFixed(1)} min
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1076,7 +1089,7 @@ export default function TrainDetailPage({ params }: PageProps) {
                       {rs.station_name || rs.station_code}
                     </td>
                     <td className="px-4 py-2.5 text-xs font-mono text-slate-600">
-                      {rs.distance_from_source_km.toFixed(1)} km
+                      {(rs.distance_from_source_km ?? 0).toFixed(1)} km
                     </td>
                     <td className="px-4 py-2.5 text-xs font-mono text-slate-600">
                       {rs.scheduled_arrival || "--:--"}

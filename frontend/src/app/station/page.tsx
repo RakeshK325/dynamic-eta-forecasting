@@ -330,7 +330,7 @@ function StationArrivalsBoardContent() {
               {/* LED Table Rows */}
               <tbody className="divide-y divide-slate-800/80 text-sm">
                 {data.arrivals.map((item: StationArrivalItem, idx: number) => {
-                  const delayMin = item.current_delay_minutes;
+                  const delayMin = item.current_delay_minutes ?? 0;
                   const isDelayed = delayMin > 1.0;
                   const isHeavyDelay = delayMin > 15.0;
 
@@ -410,7 +410,7 @@ function StationArrivalsBoardContent() {
                             : "--"}
                         </div>
                         <div className="text-[10px] text-slate-500">
-                          {item.distance_to_go_km.toFixed(0)} km away
+                          {(item.distance_to_go_km ?? 0).toFixed(0)} km away
                         </div>
                       </td>
 

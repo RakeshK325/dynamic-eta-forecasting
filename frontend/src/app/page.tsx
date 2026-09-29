@@ -956,14 +956,14 @@ export default function ControlRoomDashboard() {
                     Train: <strong>{demoScenario.train_number}</strong> ({demoScenario.current_station} &rarr; {demoScenario.next_station})
                   </span>
                   <span className="font-mono text-[11px] font-semibold text-indigo-700">
-                    {demoScenario.train_status} ({demoScenario.current_speed_kmh.toFixed(0)} km/h)
+                    {demoScenario.train_status} ({(demoScenario.current_speed_kmh ?? 0).toFixed(0)} km/h)
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px] pt-1 border-t border-slate-100">
                   <div>
                     <span className="text-slate-500">Delay:</span>{" "}
                     <strong className="text-rose-600 font-mono">
-                      +{demoScenario.current_delay_minutes.toFixed(1)}m
+                      +{(demoScenario.current_delay_minutes ?? 0).toFixed(1)}m
                     </strong>
                   </div>
                   <div>
@@ -1075,9 +1075,9 @@ export default function ControlRoomDashboard() {
                   <span>{demoResult.action_name} Executed</span>
                 </div>
                 <div className="text-slate-700 text-[11px]">
-                  <strong>New Delay:</strong> +{demoResult.new_delay_minutes.toFixed(1)}m &bull;{" "}
+                  <strong>New Delay:</strong> +{(demoResult.new_delay_minutes ?? 0).toFixed(1)}m &bull;{" "}
                   <strong>Status:</strong> {demoResult.new_status} &bull;{" "}
-                  <strong>Speed:</strong> {demoResult.speed_kmh.toFixed(1)} km/h
+                  <strong>Speed:</strong> {(demoResult.speed_kmh ?? 0).toFixed(1)} km/h
                 </div>
                 <div className="text-[11px] font-mono text-slate-700 flex justify-between pt-1 border-t border-emerald-200/60">
                   <span>Baseline: <strong>{formatTime(demoResult.baseline_eta)}</strong></span>
@@ -1234,7 +1234,7 @@ export default function ControlRoomDashboard() {
                   <strong>New Status:</strong> {injectionResult.train_state.status}
                 </div>
                 <div className="text-slate-700">
-                  <strong>New Delay:</strong> +{injectionResult.train_state.current_delay_minutes.toFixed(1)}m
+                  <strong>New Delay:</strong> +{(injectionResult.train_state.current_delay_minutes ?? 0).toFixed(1)}m
                 </div>
                 <div className="text-slate-700">
                   <strong>Updated ML ETA:</strong> {formatDateTime(injectionResult.ml_eta)}

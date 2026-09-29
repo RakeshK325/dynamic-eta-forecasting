@@ -243,6 +243,51 @@ def test_endpoint_get_train_details_ten_fields_contract(test_setup):
     assert last_up["confidence_range"]["margin_minutes"] > first_up["confidence_range"]["margin_minutes"]
 
 
+def test_endpoint_train_details_segment_predictions_contract(test_setup):
+    """
+    Regression test for segment predictions data contract:
+    Asserts that GET /train/{train_id} returns all required canonical and alias
+    fields on every segment prediction, including distance_km and segment_distance_km,
+    for both Rajdhani (12302) and Shatabdi (12028).
+    """
+    client, _, _ = test_setup
+    for train_num in ["12302", "12028"]:
+        resp = client.get(f"/train/{train_num}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "segment_predictions" in data
+        assert len(data["segment_predictions"]) > 0
+
+        for seg in data["segment_predictions"]:
+            # Canonical & alias keys must be present and non-null
+            assert "segment_distance_km" in seg and seg["segment_distance_km"] is not None
+            assert "distance_km" in seg and seg["distance_km"] is not None
+            assert seg["segment_distance_km"] == seg["distance_km"]
+            assert seg["distance_km"] > 0
+
+            assert "scheduled_transit_minutes" in seg and seg["scheduled_transit_minutes"] is not None
+            assert "scheduled_minutes" in seg and seg["scheduled_minutes"] is not None
+            assert seg["scheduled_transit_minutes"] == seg["scheduled_minutes"]
+            assert seg["scheduled_minutes"] > 0
+
+            assert "predicted_transit_minutes" in seg and seg["predicted_transit_minutes"] is not None
+            assert "predicted_minutes" in seg and seg["predicted_minutes"] is not None
+            assert seg["predicted_transit_minutes"] == seg["predicted_minutes"]
+
+            assert "baseline_transit_minutes" in seg and seg["baseline_transit_minutes"] is not None
+            assert "baseline_minutes" in seg and seg["baseline_minutes"] is not None
+            assert seg["baseline_transit_minutes"] == seg["baseline_minutes"]
+
+            assert "segment_index" in seg and seg["segment_index"] is not None
+            assert "segment_order" in seg and seg["segment_order"] is not None
+            assert seg["segment_index"] == seg["segment_order"]
+
+            assert "from_station_code" in seg and seg["from_station_code"]
+            assert "to_station_code" in seg and seg["to_station_code"]
+
+
+
+
 @pytest.mark.parametrize("invalid_id", [
     "99999",            # Non-existent numeric ID
     "0",                # Zero ID

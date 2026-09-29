@@ -58,13 +58,23 @@ export interface UpcomingStationETA {
 }
 
 export interface SegmentPrediction {
-  segment_order: number;
+  segment_index: number;
+  segment_order?: number;
   from_station_code: string;
   to_station_code: string;
-  distance_km: number;
-  scheduled_minutes: number;
-  baseline_minutes: number;
-  predicted_minutes: number;
+  to_station_name?: string | null;
+  segment_distance_km: number;
+  distance_km?: number;
+  scheduled_transit_minutes: number;
+  scheduled_minutes?: number;
+  baseline_transit_minutes?: number;
+  baseline_minutes?: number;
+  predicted_transit_minutes: number;
+  predicted_minutes?: number;
+  scheduled_dwell_minutes?: number;
+  cumulative_transit_minutes?: number;
+  predicted_arrival_time?: string;
+  predicted_departure_time?: string;
 }
 
 export interface TrainDetailResponse {

@@ -379,7 +379,7 @@ function PassengerViewContent() {
                       <option key={stn.station_code} value={stn.station_code}>
                         {idx === 0 ? "👉 NEXT: " : "Upcoming: "}
                         {stn.station_code} &mdash; {stn.station_name || stn.station_code}{" "}
-                        ({stn.distance_to_go_km.toFixed(0)} km away)
+                        ({(stn.distance_to_go_km ?? 0).toFixed(0)} km away)
                       </option>
                     ))}
                   </select>
@@ -419,7 +419,7 @@ function PassengerViewContent() {
                         <div className="flex items-center justify-between text-slate-600 pt-1.5 border-t border-slate-200/60">
                           <span>Estimated Remaining Transit:</span>
                           <span className="font-mono font-bold text-blue-700">
-                            ~{targetStationETA.predicted_remaining_minutes.toFixed(0)} min away ({targetStationETA.distance_to_go_km.toFixed(1)} km)
+                            ~{(targetStationETA.predicted_remaining_minutes ?? 0).toFixed(0)} min away ({(targetStationETA.distance_to_go_km ?? 0).toFixed(1)} km)
                           </span>
                         </div>
                       )}
