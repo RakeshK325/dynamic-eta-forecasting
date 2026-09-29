@@ -150,7 +150,7 @@ export default function ModelPerformancePage() {
   const h1 = metrics?.metrics_by_horizon?.["1_station_ahead"];
   const h3 = metrics?.metrics_by_horizon?.["3_stations_ahead"];
   const h5 = metrics?.metrics_by_horizon?.["5_stations_ahead"];
-  const dNone = metrics?.disruption_breakdown?.none ?? metrics?.metrics_by_disruption_status?.["none"] ?? metrics?.metrics_by_disruption_status?.["nominal"];
+  const dNone = metrics?.disruption_breakdown?.none ?? metrics?.metrics_by_disruption_status?.["no_disruption"] ?? metrics?.metrics_by_disruption_status?.["none"] ?? metrics?.metrics_by_disruption_status?.["nominal"];
   const dWith = metrics?.disruption_breakdown?.with_disruption ?? metrics?.metrics_by_disruption_status?.["with_disruption"] ?? metrics?.metrics_by_disruption_status?.["disrupted"];
   const datasetInfo = metrics?.dataset_info;
   const summary = metrics?.summary;
@@ -252,7 +252,7 @@ export default function ModelPerformancePage() {
                   <span>1. Overall Model Performance</span>
                 </h2>
                 <p className="text-xs text-[#66717A]">
-                  Aggregate error metrics computed over {metrics.test_samples?.toLocaleString() || "2,430"} test horizon evaluations.
+                  Aggregate error metrics computed over {(metrics.test_samples ?? overall?.sample_count)?.toLocaleString() || "--"} test horizon evaluations.
                 </p>
               </div>
 
@@ -309,7 +309,7 @@ export default function ModelPerformancePage() {
                     <p className="text-[11px] text-[#66717A]">Immediate next upcoming stop</p>
                   </div>
                   <span className="text-[11px] font-mono text-[#8A949C]">
-                    {h1?.sample_count?.toLocaleString() || "1,210"} samples
+                    {h1?.sample_count?.toLocaleString() || "--"} samples
                   </span>
                 </div>
 
@@ -335,7 +335,7 @@ export default function ModelPerformancePage() {
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
                   <span className="text-[#66717A] font-medium">Improvement:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h1?.percentage_improvement?.toFixed(1)}% ML Win
+                    +{h1?.percentage_improvement?.toFixed(1)}% Error Reduction
                   </span>
                 </div>
               </div>
@@ -351,7 +351,7 @@ export default function ModelPerformancePage() {
                     <p className="text-[11px] text-[#66717A]">Intermediate corridor checkpoints</p>
                   </div>
                   <span className="text-[11px] font-mono text-[#8A949C]">
-                    {h3?.sample_count?.toLocaleString() || "810"} samples
+                    {h3?.sample_count?.toLocaleString() || "--"} samples
                   </span>
                 </div>
 
@@ -377,7 +377,7 @@ export default function ModelPerformancePage() {
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
                   <span className="text-[#66717A] font-medium">Improvement:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h3?.percentage_improvement?.toFixed(1)}% ML Win
+                    +{h3?.percentage_improvement?.toFixed(1)}% Error Reduction
                   </span>
                 </div>
               </div>
@@ -393,7 +393,7 @@ export default function ModelPerformancePage() {
                     <p className="text-[11px] text-[#66717A]">Distant terminus horizon</p>
                   </div>
                   <span className="text-[11px] font-mono text-[#8A949C]">
-                    {h5?.sample_count?.toLocaleString() || "410"} samples
+                    {h5?.sample_count?.toLocaleString() || "--"} samples
                   </span>
                 </div>
 
@@ -419,7 +419,7 @@ export default function ModelPerformancePage() {
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
                   <span className="text-[#66717A] font-medium">Improvement:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h5?.percentage_improvement?.toFixed(1)}% ML Win
+                    +{h5?.percentage_improvement?.toFixed(1)}% Error Reduction
                   </span>
                 </div>
               </div>
@@ -446,7 +446,7 @@ export default function ModelPerformancePage() {
                       <th className="px-3.5 py-2">Baseline RMSE</th>
                       <th className="px-3.5 py-2 text-[#2563A8]">ML RMSE</th>
                       <th className="px-3.5 py-2 text-right">Accuracy Gain</th>
-                      <th className="px-3.5 py-2 text-right">Winner</th>
+                      <th className="px-3.5 py-2 text-right">Lower Error</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#D9DEE3]/70">
@@ -507,7 +507,7 @@ export default function ModelPerformancePage() {
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-[#66717A] bg-[#F0F3F5] px-2 py-0.5 rounded border border-[#D9DEE3]">
-                    {dNone?.sample_count?.toLocaleString() || "1,585"} samples
+                    {dNone?.sample_count?.toLocaleString() || "--"} samples
                   </span>
                 </div>
 
@@ -538,7 +538,7 @@ export default function ModelPerformancePage() {
 
                 <div className="p-2.5 bg-[#F8FAFB] rounded text-xs text-[#66717A] border border-[#D9DEE3]">
                   <span className="font-semibold text-[#172026]">Result:</span> ML reduces prediction error by{" "}
-                  <strong>{dNone?.percentage_improvement?.toFixed(1) || "62.4"}%</strong> under nominal line conditions.
+                  <strong>{dNone?.percentage_improvement?.toFixed(1) ?? "--"}%</strong> under nominal line conditions.
                 </div>
               </div>
 
@@ -558,7 +558,7 @@ export default function ModelPerformancePage() {
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-[#66717A] bg-[#F0F3F5] px-2 py-0.5 rounded border border-[#D9DEE3]">
-                    {dWith?.sample_count?.toLocaleString() || "845"} samples
+                    {dWith?.sample_count?.toLocaleString() || "--"} samples
                   </span>
                 </div>
 
@@ -589,7 +589,7 @@ export default function ModelPerformancePage() {
 
                 <div className="p-2.5 bg-[#F8FAFB] rounded text-xs text-[#66717A] border border-[#D9DEE3]">
                   <span className="font-semibold text-[#172026]">Result:</span> ML preserves a{" "}
-                  <strong>{dWith?.percentage_improvement?.toFixed(1) || "60.9"}%</strong> error advantage during disruptions.
+                  <strong>{dWith?.percentage_improvement?.toFixed(1) ?? "--"}%</strong> error advantage during disruptions.
                 </div>
               </div>
             </div>
@@ -615,10 +615,10 @@ export default function ModelPerformancePage() {
                   <span>Journeys</span>
                 </div>
                 <div className="text-lg font-bold font-mono text-[#172026]">
-                  {summary?.total_test_journeys || metrics.test_journeys || 40} Test
+                  {summary?.total_test_journeys || metrics.test_journeys || "--"} Test
                 </div>
                 <div className="text-[11px] text-[#66717A]">
-                  Out of {datasetInfo?.total_journeys || metrics.total_journeys || 200} total corridor journeys.
+                  Out of {datasetInfo?.total_journeys || metrics.total_journeys || "--"} total corridor journeys.
                 </div>
               </div>
 
@@ -629,10 +629,10 @@ export default function ModelPerformancePage() {
                   <span>Evaluated Samples</span>
                 </div>
                 <div className="text-lg font-bold font-mono text-[#172026]">
-                  {(overall?.sample_count || metrics.test_samples || 2430).toLocaleString()}
+                  {(overall?.sample_count || metrics.test_samples || 0).toLocaleString() || "--"}
                 </div>
                 <div className="text-[11px] text-[#66717A]">
-                  From {datasetInfo?.total_samples?.toLocaleString() || "6,125"} total records.
+                  From {datasetInfo?.total_samples?.toLocaleString() || "--"} total records.
                 </div>
               </div>
 
@@ -643,7 +643,7 @@ export default function ModelPerformancePage() {
                   <span>Evaluation Date</span>
                 </div>
                 <div className="text-xs font-bold font-mono text-[#172026] truncate">
-                  {metrics.evaluation_timestamp ? formatDateTime(metrics.evaluation_timestamp) : "2026-09-27"}
+                  {metrics.evaluation_timestamp ? formatDateTime(metrics.evaluation_timestamp) : "--"}
                 </div>
                 <div className="text-[10px] text-[#8A949C] font-mono truncate" title={metrics.evaluation_timestamp || ""}>
                   {metrics.evaluation_timestamp || "N/A"}

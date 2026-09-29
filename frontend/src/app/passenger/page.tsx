@@ -135,7 +135,7 @@ function PassengerViewContent() {
     trainDetails?.current_delay ??
     0;
   const delayInfo = formatDelay(currentDelayMinutes);
-  const currentStation = trainDetails?.current_station || "Origin Station";
+  const currentStation = trainDetails?.current_station || "--";
 
   return (
     <div className="max-w-[1040px] mx-auto w-full space-y-4 pb-12">
