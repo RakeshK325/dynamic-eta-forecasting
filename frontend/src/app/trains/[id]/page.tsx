@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, formatDateTime, formatTime, formatDelay } from "@/lib/api";
+import { api, formatDateTime, formatDelay } from "@/lib/api";
 import {
   TrainDetailResponse,
   RouteStationInfo,
@@ -419,7 +419,7 @@ export default function TrainDetailPage({ params }: PageProps) {
   const delayHistoryValues = train.delay_history || [currentDelayMin];
 
   return (
-    <div className="space-y-5">
+    <div className="w-full max-w-[1560px] mx-auto space-y-5 pb-12">
       {/* 1. Header & Navigation */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">

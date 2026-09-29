@@ -1,26 +1,21 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api, formatDelay, formatTime } from "@/lib/api";
+import { api, formatTime } from "@/lib/api";
 import {
   TrainListItem,
-  ModelMetricsResponse,
   EventInjectionResponse,
-  DataSourceConfigResponse,
   DemoScenarioResponse,
   DemoActionResult,
 } from "@/types/api";
-import { TableRowSkeleton, CardSkeleton } from "@/components/LoadingSkeleton";
+import { TableRowSkeleton } from "@/components/LoadingSkeleton";
 
 export default function ControlRoomDashboard() {
   const router = useRouter();
 
   // Data states
   const [trains, setTrains] = useState<TrainListItem[]>([]);
-  const [metrics, setMetrics] = useState<ModelMetricsResponse | null>(null);
-  const [dataSourceConfig, setDataSourceConfig] = useState<DataSourceConfigResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +25,9 @@ export default function ControlRoomDashboard() {
 
   // Retain trains across poll hiccups
   const trainsRef = useRef<TrainListItem[]>([]);
-  trainsRef.current = trains;
+  useEffect(() => {
+    trainsRef.current = trains;
+  }, [trains]);
 
   // View state: "table" | "cards"
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
@@ -72,16 +69,12 @@ export default function ControlRoomDashboard() {
     }
 
     try {
-      const [trainsRes, metricsRes, configRes, demoRes] = await Promise.all([
+      const [trainsRes, demoRes] = await Promise.all([
         api.getTrains(),
-        api.getModelMetrics().catch(() => null),
-        api.getDataSourceConfig().catch(() => null),
         api.getDemoScenario().catch(() => null),
       ]);
 
       setTrains(trainsRes.trains);
-      if (metricsRes) setMetrics(metricsRes);
-      if (configRes) setDataSourceConfig(configRes);
       if (demoRes) setDemoScenario(demoRes);
       setLastRefreshed(new Date());
       setIsStale(false);
@@ -219,7 +212,7 @@ export default function ControlRoomDashboard() {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-[1560px] mx-auto space-y-4 pb-12">
       {/* Non-blocking Stale Notification Banner */}
       {isStale && (
         <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-[#B77900] flex items-center justify-between">
@@ -417,7 +410,7 @@ export default function ControlRoomDashboard() {
             <table className="w-full">
               <tbody className="divide-y divide-[#D9DEE3]/70">
                 {Array.from({ length: 8 }).map((_, i) => (
-                  <TableRowSkeleton key={i} cols={9} />
+                  <TableRowSkeleton key={i} cols={10} />
                 ))}
               </tbody>
             </table>
@@ -451,7 +444,8 @@ export default function ControlRoomDashboard() {
                   <th className="py-2.5 px-2 text-center">TREND</th>
                   <th className="py-2.5 px-3">NEXT STATION</th>
                   <th className="py-2.5 px-3 text-right">BASELINE ETA</th>
-                  <th className="py-2.5 px-4 text-right">ML ETA</th>
+                  <th className="py-2.5 px-3 text-right">ML ETA</th>
+                  <th className="py-2.5 px-3 text-right">ACTION</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#D9DEE3]/70 bg-[#FFFFFF]">
@@ -548,7 +542,7 @@ export default function ControlRoomDashboard() {
                       </td>
 
                       {/* ML ETA */}
-                      <td className="py-2.5 px-4 text-right whitespace-nowrap font-mono font-bold">
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold">
                         {train.ml_eta ? (
                           <span
                             className={
@@ -562,6 +556,13 @@ export default function ControlRoomDashboard() {
                         ) : (
                           <span className="text-[#8A949C]">--:--</span>
                         )}
+                      </td>
+
+                      {/* ACTION */}
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        <span className="inline-block px-2 py-0.5 rounded bg-[#F0F3F5] group-hover:bg-[#172026] group-hover:text-white border border-[#D9DEE3] text-[#172026] text-[11px] font-semibold transition-colors">
+                          Stops &rarr;
+                        </span>
                       </td>
                     </tr>
                   );
@@ -797,7 +798,7 @@ export default function ControlRoomDashboard() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
                       Event Type
@@ -815,7 +816,21 @@ export default function ControlRoomDashboard() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
-                      Delay (Minutes)
+                      Severity
+                    </label>
+                    <select
+                      value={severity}
+                      onChange={(e) => setSeverity(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-[#F5F7F8] border border-[#D9DEE3] rounded text-xs font-mono text-[#172026]"
+                    >
+                      <option value="LOW">Low</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HIGH">High</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
+                      Delay (Mins)
                     </label>
                     <input
                       type="number"

@@ -59,7 +59,7 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 bg-[#FFFFFF] border-b border-[#D9DEE3] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <div className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1560px] mx-auto px-3 sm:px-4 md:px-5 lg:px-6 xl:px-8">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-3">
           {/* Left: Brand & Operations Subtitle */}
           <div className="flex items-center space-x-3 shrink-0">

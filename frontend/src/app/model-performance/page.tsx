@@ -156,7 +156,7 @@ export default function ModelPerformancePage() {
   const summary = metrics?.summary;
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="w-full max-w-[1560px] mx-auto space-y-6 pb-12">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#D9DEE3]">
         <div>
