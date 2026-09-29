@@ -9,6 +9,10 @@ import {
   TrainDetailResponse,
   UpcomingStationETA,
 } from "@/types/api";
+import UncertaintyRangeBar from "@/components/UncertaintyRangeBar";
+import { StatusBadge } from "@/components/StatusBadge";
+import EtaComparisonBadge from "@/components/EtaComparisonBadge";
+import { CardSkeleton, Skeleton } from "@/components/LoadingSkeleton";
 
 function PassengerViewContent() {
   const searchParams = useSearchParams();
@@ -278,13 +282,8 @@ function PassengerViewContent() {
 
       {/* Loading Details State */}
       {loadingDetails && (
-        <div className="p-8 bg-white rounded-2xl border border-slate-200 text-center space-y-2">
-          <div className="inline-block animate-spin text-2xl text-blue-600">
-            ⏳
-          </div>
-          <p className="text-sm font-medium text-slate-700">
-            Fetching live GPS telemetry and ML forecast...
-          </p>
+        <div className="space-y-4">
+          <CardSkeleton />
         </div>
       )}
 
@@ -313,15 +312,7 @@ function PassengerViewContent() {
                 <span className="text-[11px] font-semibold tracking-wider text-blue-300 uppercase">
                   {trainDetails.train_type} &bull; Route #{trainDetails.route_id}
                 </span>
-                <span
-                  className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
-                    trainDetails.current_state?.status === "HALTED"
-                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                      : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                  }`}
-                >
-                  {trainDetails.current_state?.status || "RUNNING"}
-                </span>
+                <StatusBadge status={trainDetails.current_state?.status} size="sm" />
               </div>
               <h2 className="text-xl font-bold mt-1 tracking-tight">
                 {trainDetails.train_number} &mdash; {trainName}
@@ -399,59 +390,39 @@ function PassengerViewContent() {
                 )}
               </div>
 
-              {/* 4. Expected Arrival (ML ETA) Highlight Box */}
+              {/* 4. Expected Arrival & Prediction Uncertainty Window */}
               {targetStationETA ? (
-                <div className="bg-linear-to-b from-blue-500/10 to-indigo-500/5 p-4 sm:p-5 rounded-2xl border-2 border-blue-500/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-blue-900">
-                      Expected Arrival Time
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-600 text-white tracking-wide">
-                      XGBoost ML ETA
-                    </span>
-                  </div>
+                <div className="space-y-3">
+                  <UncertaintyRangeBar
+                    mlEta={targetStationETA.ml_eta || targetStationETA.predicted_eta}
+                    lowerBound={targetStationETA.confidence_lower_bound}
+                    upperBound={targetStationETA.confidence_upper_bound}
+                    marginMinutes={targetStationETA.confidence_range?.margin_minutes}
+                    segmentsAhead={targetStationETA.segments_ahead}
+                    variant="card"
+                  />
 
-                  {/* Big Readable Expected Time */}
-                  <div className="flex items-baseline space-x-2">
-                    <div className="text-3xl sm:text-4xl font-extrabold text-blue-700 tracking-tight font-mono">
-                      {formatTime(targetStationETA.ml_eta || targetStationETA.predicted_eta)}
+                  {/* Supplemental Timetable & Distance Details */}
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-medium">Timetable Schedule:</span>
+                      <EtaComparisonBadge type="scheduled" time={targetStationETA.scheduled_eta} size="sm" />
                     </div>
+                    {targetStationETA.baseline_eta && (
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60">
+                        <span className="text-slate-500 font-medium">Speed Heuristic Baseline:</span>
+                        <EtaComparisonBadge type="baseline" time={targetStationETA.baseline_eta} size="sm" />
+                      </div>
+                    )}
                     {targetStationETA.predicted_remaining_minutes !== undefined &&
                       targetStationETA.predicted_remaining_minutes !== null && (
-                        <div className="text-xs sm:text-sm font-semibold text-blue-800">
-                          (~{targetStationETA.predicted_remaining_minutes.toFixed(0)} min away)
+                        <div className="flex items-center justify-between text-slate-600 pt-1.5 border-t border-slate-200/60">
+                          <span>Estimated Remaining Transit:</span>
+                          <span className="font-mono font-bold text-blue-700">
+                            ~{targetStationETA.predicted_remaining_minutes.toFixed(0)} min away ({targetStationETA.distance_to_go_km.toFixed(1)} km)
+                          </span>
                         </div>
                       )}
-                  </div>
-
-                  <div className="text-xs text-slate-600">
-                    Arrival date:{" "}
-                    <strong className="text-slate-800">
-                      {formatDateTime(targetStationETA.ml_eta || targetStationETA.predicted_eta)}
-                    </strong>
-                  </div>
-
-                  {/* 5. Confidence Range */}
-                  <div className="pt-2.5 border-t border-blue-200/60 text-xs space-y-1">
-                    <div className="font-semibold text-slate-700 flex items-center justify-between">
-                      <span>Confidence Window:</span>
-                      <span className="font-mono text-blue-900 font-bold">
-                        {formatTime(targetStationETA.confidence_lower_bound)} &ndash;{" "}
-                        {formatTime(targetStationETA.confidence_upper_bound)}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      Expected window based on real-time line conditions (&plusmn;
-                      {targetStationETA.confidence_range?.margin_minutes?.toFixed(1) || "0.0"}m).
-                    </div>
-                  </div>
-
-                  {/* Timetable Comparison */}
-                  <div className="pt-2 border-t border-blue-100 flex items-center justify-between text-xs text-slate-500">
-                    <span>Scheduled Timetable ETA:</span>
-                    <span className="font-mono font-medium text-slate-700">
-                      {formatTime(targetStationETA.scheduled_eta)}
-                    </span>
                   </div>
                 </div>
               ) : null}

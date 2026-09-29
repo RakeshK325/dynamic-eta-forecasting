@@ -141,16 +141,22 @@ def load_latest_metrics(
     by_horizon = eval_data.get("by_horizon", {})
     by_disruption = eval_data.get("by_disruption", {})
     cross_tab = eval_data.get("cross_tabulation", {})
+    summary = eval_data.get("summary", {})
 
     evaluated_samples = (
         overall.get("sample_count")
-        or eval_data.get("summary", {}).get("total_evaluated_samples")
+        or summary.get("total_evaluated_samples")
         or test_samples
     )
     baseline_mae = overall.get("baseline_mae")
     ml_mae = overall.get("ml_mae")
     baseline_rmse = overall.get("baseline_rmse")
     ml_rmse = overall.get("ml_rmse")
+
+    dataset_info_dict = meta.get("dataset_info", {}) if meta_path.exists() else {}
+    total_journeys = dataset_info_dict.get("total_journeys")
+    train_journeys = dataset_info_dict.get("train_journeys")
+    test_journeys = summary.get("total_test_journeys") or dataset_info_dict.get("test_journeys")
 
     return {
         "status": "AVAILABLE",
@@ -160,6 +166,11 @@ def load_latest_metrics(
         "training_timestamp": training_timestamp,
         "total_training_samples": total_training_samples,
         "test_samples": evaluated_samples,
+        "total_journeys": total_journeys,
+        "train_journeys": train_journeys,
+        "test_journeys": test_journeys,
+        "dataset_info": dataset_info_dict,
+        "summary": summary,
         "baseline_mae": baseline_mae,
         "ml_mae": ml_mae,
         "baseline_rmse": baseline_rmse,

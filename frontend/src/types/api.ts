@@ -231,6 +231,24 @@ export interface ModelMetricsResponse {
   training_timestamp: string | null;
   total_training_samples: number | null;
   test_samples: number | null;
+  total_journeys?: number | null;
+  train_journeys?: number | null;
+  test_journeys?: number | null;
+  dataset_info?: {
+    total_samples?: number;
+    train_samples?: number;
+    test_samples?: number;
+    total_journeys?: number;
+    train_journeys?: number;
+    test_journeys?: number;
+    test_ratio?: number;
+    random_seed?: number;
+  } | null;
+  summary?: {
+    total_test_journeys?: number;
+    total_evaluated_samples?: number;
+    random_seed?: number;
+  } | null;
   baseline_mae: number | null;
   ml_mae: number | null;
   baseline_rmse: number | null;
@@ -239,6 +257,7 @@ export interface ModelMetricsResponse {
   by_horizon?: Record<string, HorizonMetrics> | null;
   metrics_by_disruption_status: Record<string, DisruptionMetrics> | null;
   by_disruption?: Record<string, DisruptionMetrics> | null;
+  cross_tabulation?: Record<string, HorizonMetrics> | null;
   overall?: HorizonMetrics | null;
   evaluation_timestamp: string | null;
   message?: string | null;

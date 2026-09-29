@@ -20,6 +20,7 @@ from typing import Optional, Union, List, Any, TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from backend.services.schemas import TrainRunningState
+from backend.simulator.engine import SimulatorStoppedError
 from backend.services.railway_api_client import (
     RailRadarClient,
     RailwayAPIError,
@@ -189,6 +190,9 @@ class TrainStateProvider:
         """Retrieves and packages dynamic running state from active simulator."""
         if not sim:
             raise RuntimeError("Train simulator is not available.")
+
+        if not getattr(sim, "is_running", True):
+            raise SimulatorStoppedError("Train simulator is currently stopped.")
 
         # Ensure train journey is loaded in simulator
         if train_number not in sim.journeys:

@@ -207,7 +207,13 @@ class RailRadarClient:
                 print(f"[RailRadarClient] Failed to save debug dump to {debug_output_file}: {e}")
 
         # Normalize into TrainRunningState
-        normalized_state = self.normalize_payload(raw_data, fallback_train_number=cleaned_number)
+        try:
+            normalized_state = self.normalize_payload(raw_data, fallback_train_number=cleaned_number)
+        except MalformedResponseError:
+            raise
+        except Exception as exc:
+            clean_err = sanitize_secret(str(exc), key)
+            raise MalformedResponseError(f"Malformed external API data: {clean_err}") from exc
 
         # Store in cache (Requirement 1 & 2)
         if self.enable_cache and self.cache:
@@ -225,6 +231,8 @@ class RailRadarClient:
 
         # Unwrap common wrapper keys if present
         payload = data.get("data") if isinstance(data.get("data"), dict) else data
+        if not isinstance(payload, dict):
+            raise MalformedResponseError(f"Expected JSON dictionary payload, got {type(payload).__name__}")
 
         # 1. train_number
         number = str(
@@ -285,14 +293,26 @@ class RailRadarClient:
             raw_delay = curr_loc.get("delayMinutes")
             if raw_delay is None:
                 raw_delay = payload.get("delayMinutes", payload.get("delay_minutes", payload.get("delay", 0.0)))
-            segment_progress = float(curr_loc.get("segmentProgress", payload.get("segment_progress", 0.0)))
-            speed_kmh = float(curr_loc.get("speedKmh", payload.get("speed_kmh", payload.get("speed", 0.0))))
+            try:
+                segment_progress = float(curr_loc.get("segmentProgress", payload.get("segment_progress", 0.0)) or 0.0)
+            except (TypeError, ValueError):
+                segment_progress = 0.0
+            try:
+                speed_kmh = float(curr_loc.get("speedKmh", payload.get("speed_kmh", payload.get("speed", 0.0)) or 0.0))
+            except (TypeError, ValueError):
+                speed_kmh = 0.0
         else:
             current_station_code = str(curr_loc) if curr_loc else payload.get("current_station_code")
             current_station_sequence = payload.get("current_station_sequence")
             raw_delay = payload.get("delayMinutes", payload.get("delay_minutes", payload.get("delay", 0.0)))
-            segment_progress = float(payload.get("segment_progress", 0.0))
-            speed_kmh = float(payload.get("speed_kmh", payload.get("speed", 0.0)))
+            try:
+                segment_progress = float(payload.get("segment_progress", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                segment_progress = 0.0
+            try:
+                speed_kmh = float(payload.get("speed_kmh", payload.get("speed", 0.0)) or 0.0)
+            except (TypeError, ValueError):
+                speed_kmh = 0.0
 
         # Delay in minutes
         try:

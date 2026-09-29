@@ -1,12 +1,14 @@
 import os
+import math
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any, Union
-from fastapi import FastAPI, Depends, HTTPException, Query, Path
+from fastapi import FastAPI, Depends, HTTPException, Query, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.database.connection import get_db, SessionLocal
 from backend.database.init_db import init_db
@@ -21,7 +23,7 @@ from backend.services.multi_station_eta import (
 )
 from backend.features.feature_builder import FeatureBuilder, TrainFeatures
 from backend.simulator.events import EventType, SimulationEvent
-from backend.simulator.engine import TrainSimulator
+from backend.simulator.engine import TrainSimulator, SimulatorStoppedError
 from pathlib import Path as FilePath
 from backend.ml.evaluate_model import (
     load_latest_metrics,
@@ -345,6 +347,11 @@ class ModelMetricsResponse(BaseModel):
     training_timestamp: Optional[Union[datetime, str]] = Field(default=None, description="Timestamp when model was trained")
     total_training_samples: Optional[int] = Field(default=None, description="Total number of training samples")
     test_samples: Optional[int] = Field(default=None, description="Total number of evaluated test samples")
+    total_journeys: Optional[int] = Field(default=None, description="Total number of journeys in dataset")
+    train_journeys: Optional[int] = Field(default=None, description="Number of training journeys")
+    test_journeys: Optional[int] = Field(default=None, description="Number of held-out test journeys")
+    dataset_info: Optional[Dict[str, Any]] = Field(default=None, description="Dataset metadata and split details")
+    summary: Optional[Dict[str, Any]] = Field(default=None, description="Evaluation summary statistics")
     baseline_mae: Optional[float] = Field(default=None, description="Overall baseline heuristic Mean Absolute Error (minutes)")
     ml_mae: Optional[float] = Field(default=None, description="Overall ML model Mean Absolute Error (minutes)")
     baseline_rmse: Optional[float] = Field(default=None, description="Overall baseline heuristic Root Mean Squared Error (minutes)")
@@ -435,6 +442,117 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    """Gracefully handles database operational or connection errors with a structured 503 response."""
+    clean_msg = sanitize_secret(str(exc))
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "DATABASE_UNAVAILABLE",
+            "message": "The database is temporarily unavailable or experiencing connection issues.",
+            "detail": clean_msg,
+            "status_code": 503,
+            "suggested_action": "Verify database file accessibility and retry.",
+        },
+    )
+
+
+@app.exception_handler(SimulatorStoppedError)
+async def simulator_stopped_exception_handler(request: Request, exc: SimulatorStoppedError):
+    """Gracefully handles simulator stopped or paused state with a structured 503 response."""
+    clean_msg = sanitize_secret(str(exc))
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "SIMULATOR_STOPPED",
+            "message": "Train simulator is currently stopped or unavailable.",
+            "detail": clean_msg,
+            "status_code": 503,
+            "suggested_action": "Start or resume the simulator engine.",
+        },
+    )
+
+
+@app.exception_handler(RailwayAPIError)
+async def railway_api_exception_handler(request: Request, exc: RailwayAPIError):
+    """Maps Railway API client errors into structured responses indicating simulator fallback."""
+    clean_msg = sanitize_secret(str(exc))
+    status_code = 503
+    err_code = "LIVE_DATA_UNAVAILABLE"
+
+    if isinstance(exc, TrainNotFoundError):
+        status_code = 404
+        err_code = "TRAIN_NOT_FOUND"
+    elif isinstance(exc, RateLimitExceededError):
+        status_code = 429
+        err_code = "RATE_LIMIT_EXCEEDED"
+    elif isinstance(exc, (AuthenticationError, MissingApiKeyError)):
+        status_code = 503
+        err_code = "AUTHENTICATION_ERROR"
+    elif isinstance(exc, APITimeoutError):
+        status_code = 503
+        err_code = "NETWORK_TIMEOUT"
+    elif isinstance(exc, MalformedResponseError):
+        status_code = 503
+        err_code = "MALFORMED_EXTERNAL_DATA"
+    elif isinstance(exc, ServiceUnavailableError):
+        status_code = 503
+        err_code = "SERVICE_UNAVAILABLE"
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": err_code,
+            "message": clean_msg,
+            "detail": clean_msg,
+            "simulator_mode_available": True,
+            "simulator_available": True,
+            "suggested_action": "External railway telemetry is unavailable. Simulator mode is available as a fallback.",
+            "status_code": status_code,
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Enriches HTTPException with structured machine-readable error codes while preserving detail."""
+    if isinstance(exc.detail, dict):
+        content = {
+            "error": exc.detail.get("error", "HTTP_ERROR"),
+            "message": exc.detail.get("message", str(exc.detail.get("detail", "An error occurred"))),
+            "detail": exc.detail.get("detail", str(exc.detail)),
+            "status_code": exc.status_code,
+            **exc.detail,
+        }
+    else:
+        err_code = "HTTP_ERROR"
+        if exc.status_code == 404:
+            err_code = "NOT_FOUND"
+            if "train" in str(exc.detail).lower():
+                err_code = "TRAIN_NOT_FOUND"
+            elif "station" in str(exc.detail).lower():
+                err_code = "STATION_NOT_FOUND"
+        elif exc.status_code == 400:
+            err_code = "BAD_REQUEST"
+            if "not on the route" in str(exc.detail).lower() or "route" in str(exc.detail).lower():
+                err_code = "STATION_NOT_ON_ROUTE"
+        elif exc.status_code == 503:
+            err_code = "SERVICE_UNAVAILABLE"
+
+        content = {
+            "error": err_code,
+            "message": str(exc.detail),
+            "detail": str(exc.detail),
+            "status_code": exc.status_code,
+        }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+        headers=exc.headers,
+    )
 
 
 def get_active_simulator() -> TrainSimulator:
@@ -780,13 +898,23 @@ def get_train_details(
         raise HTTPException(status_code=404, detail=f"Train '{train_id}' not found.")
 
     # 1. Running state via provider (SIMULATOR or LIVE_API with fallback)
-    provider_result = provider.get_train_state(
-        train_number=train.train_number,
-        db=db,
-        sim=sim,
-        mode_override=data_source,
-        fallback_on_error=True,
-    )
+    try:
+        provider_result = provider.get_train_state(
+            train_number=train.train_number,
+            db=db,
+            sim=sim,
+            mode_override=data_source,
+            fallback_on_error=True,
+        )
+    except SimulatorStoppedError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "SIMULATOR_STOPPED",
+                "message": "Train simulator is currently stopped or unavailable.",
+                "detail": str(exc),
+            },
+        )
     running_state = provider_result.state
     active_events: List[Dict[str, Any]] = []
     if provider_result.active_events:
@@ -874,8 +1002,74 @@ def get_train_details(
                     segment_predictions=pred.segment_predictions,
                 ))
         except Exception:
-            # Graceful fallback if prediction fails
+            # Graceful fallback if ML prediction fails
             pass
+
+    # Ensure baseline ETA fallback if ML predictions failed or were empty
+    if running_state and sorted_stops and not upcoming_stations:
+        curr_code = (running_state.current_station_code or "").upper().strip()
+        curr_seq = running_state.current_station_sequence or 1
+        curr_idx = 0
+        for idx, s in enumerate(sorted_stops):
+            code = getattr(s, "station_code", getattr(s, "code", "")).upper().strip()
+            seq = getattr(s, "sequence", getattr(s, "seq", idx + 1))
+            if code == curr_code or seq == curr_seq:
+                curr_idx = idx
+                break
+
+        for j, target_stop in enumerate(sorted_stops[curr_idx + 1:]):
+            t_code = getattr(target_stop, "station_code", getattr(target_stop, "code", "")).upper().strip()
+            t_name = getattr(target_stop, "station_name", getattr(target_stop, "name", t_code))
+            t_seq = int(getattr(target_stop, "sequence", getattr(target_stop, "seq", curr_idx + j + 2)))
+            try:
+                b_pred = baseline_service.predict_station(
+                    train_state=running_state,
+                    target_station_code=t_code,
+                    route_stations=sorted_stops,
+                    db=db,
+                )
+                b_eta = b_pred.baseline_eta
+                s_eta = b_pred.scheduled_eta
+                dist_km = b_pred.distance_to_go_km
+                rem_min = (
+                    max(0.0, (b_eta - running_state.timestamp).total_seconds() / 60.0)
+                    if running_state.timestamp
+                    else 0.0
+                )
+                uncertainty = round(5.0 * math.sqrt(j + 1), 1)
+                c_range = ConfidenceRange(
+                    lower_bound=b_eta - timedelta(minutes=uncertainty),
+                    upper_bound=b_eta + timedelta(minutes=uncertainty),
+                    margin_minutes=uncertainty,
+                    lower_bound_minutes=max(0.0, rem_min - uncertainty),
+                    upper_bound_minutes=rem_min + uncertainty,
+                )
+                sched_rem = (
+                    max(0.0, (s_eta - running_state.timestamp).total_seconds() / 60.0)
+                    if (running_state.timestamp and s_eta)
+                    else None
+                )
+                upcoming_stations.append(UpcomingStationETA(
+                    station_code=t_code,
+                    station_name=t_name,
+                    station_sequence=t_seq,
+                    distance_to_go_km=dist_km,
+                    segments_ahead=j + 1,
+                    intermediate_halts=j,
+                    scheduled_eta=s_eta or b_eta,
+                    baseline_eta=b_eta,
+                    ml_eta=b_eta,
+                    predicted_eta=b_eta,
+                    scheduled_remaining_minutes=sched_rem,
+                    baseline_remaining_minutes=rem_min,
+                    predicted_remaining_minutes=rem_min,
+                    confidence_lower_bound=b_eta - timedelta(minutes=uncertainty),
+                    confidence_upper_bound=b_eta + timedelta(minutes=uncertainty),
+                    confidence_range=c_range,
+                    segment_predictions=[],
+                ))
+            except Exception:
+                pass
 
     # 5. Populate immediate next station ETAs and full upcoming segment breakdown
     next_stop_eta = upcoming_stations[0] if upcoming_stations else None
@@ -1120,6 +1314,9 @@ def get_station_arrivals(
             ref_time = ref_time.replace(tzinfo=timezone.utc)
 
     arrivals: List[StationArrivalItem] = []
+    if sim and not getattr(sim, "is_running", True):
+        raise SimulatorStoppedError("Train simulator is currently stopped.")
+
     if not sim or not sim.journeys:
         return StationArrivalsResponse(
             station_code=station.code,
@@ -1411,8 +1608,12 @@ def reset_demo_scenario(
     sim: TrainSimulator = Depends(get_active_simulator),
     demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
 ):
+    if sim and not getattr(sim, "is_running", True):
+        raise SimulatorStoppedError("Train simulator is currently stopped.")
     try:
         return demo_mgr.reset_scenario(db, sim)
+    except SimulatorStoppedError:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to reset demo scenario: {str(exc)}")
 
@@ -1428,8 +1629,12 @@ def get_demo_scenario(
     sim: TrainSimulator = Depends(get_active_simulator),
     demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
 ):
+    if sim and not getattr(sim, "is_running", True):
+        raise SimulatorStoppedError("Train simulator is currently stopped.")
     try:
         return demo_mgr.get_scenario(db, sim)
+    except SimulatorStoppedError:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve demo scenario: {str(exc)}")
 
@@ -1452,8 +1657,12 @@ def execute_demo_action(
     sim: TrainSimulator = Depends(get_active_simulator),
     demo_mgr: DemoScenarioManager = Depends(get_demo_manager),
 ):
+    if sim and not getattr(sim, "is_running", True):
+        raise SimulatorStoppedError("Train simulator is currently stopped.")
     try:
         return demo_mgr.execute_action(action_id, db, sim)
+    except SimulatorStoppedError:
+        raise
     except ValueError as val_err:
         raise HTTPException(status_code=400, detail=str(val_err))
     except Exception as exc:

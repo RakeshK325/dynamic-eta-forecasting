@@ -21,8 +21,15 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-class ApiError extends Error {
+export interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+export class ApiError extends Error {
   status: number;
+  errorCode?: string;
+  detail?: string;
+  suggestedAction?: string;
   data: unknown;
 
   constructor(message: string, status: number, data?: unknown) {
@@ -30,10 +37,17 @@ class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.data = data;
+
+    if (typeof data === "object" && data !== null) {
+      const d = data as Record<string, unknown>;
+      if (typeof d.error === "string") this.errorCode = d.error;
+      if (typeof d.detail === "string") this.detail = d.detail;
+      if (typeof d.suggested_action === "string") this.suggestedAction = d.suggested_action;
+    }
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const headers = {
     "Content-Type": "application/json",
@@ -41,11 +55,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     ...options.headers,
   };
 
+  const timeoutMs = options.timeoutMs ?? 10000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const res = await fetch(url, {
       ...options,
       headers,
+      signal: options.signal || controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       let errorBody: unknown;
@@ -55,21 +75,41 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         errorBody = await res.text();
       }
 
-      const errorMessage =
-        typeof errorBody === "object" && errorBody !== null && "detail" in errorBody
-          ? String((errorBody as { detail: unknown }).detail)
-          : `HTTP error ${res.status}: ${res.statusText}`;
+      let errorMessage = `HTTP error ${res.status}: ${res.statusText}`;
+      if (typeof errorBody === "object" && errorBody !== null) {
+        const eb = errorBody as Record<string, unknown>;
+        if (typeof eb.message === "string" && eb.message.trim()) {
+          errorMessage = eb.message.trim();
+        } else if (typeof eb.detail === "string" && eb.detail.trim()) {
+          errorMessage = eb.detail.trim();
+        } else if (typeof eb.error === "string" && eb.error.trim()) {
+          errorMessage = eb.error.trim();
+        }
+      } else if (typeof errorBody === "string" && errorBody.trim()) {
+        errorMessage = errorBody.trim().slice(0, 200);
+      }
 
       throw new ApiError(errorMessage, res.status, errorBody);
     }
 
     return (await res.json()) as T;
   } catch (err: unknown) {
+    clearTimeout(timeoutId);
     if (err instanceof ApiError) {
       throw err;
     }
-    const message = err instanceof Error ? err.message : "Network error";
-    throw new ApiError(`Failed to connect to API at ${url}: ${message}`, 0, err);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(
+        `Connection timed out after ${(timeoutMs / 1000).toFixed(0)}s connecting to ${endpoint}. Please verify FastAPI is running.`,
+        408
+      );
+    }
+    const message = err instanceof Error ? err.message : "Network unreachable";
+    throw new ApiError(
+      `Unable to reach backend service (${message}). Please ensure FastAPI is running on http://localhost:8000.`,
+      0,
+      err
+    );
   }
 }
 

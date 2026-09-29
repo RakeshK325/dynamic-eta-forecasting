@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, formatDateTime, formatTime, formatDelay } from "@/lib/api";
 import { StationArrivalsResponse, StationArrivalItem } from "@/types/api";
+import UncertaintyRangeBar from "@/components/UncertaintyRangeBar";
 
 function StationArrivalsBoardContent() {
   const searchParams = useSearchParams();
@@ -317,8 +318,8 @@ function StationArrivalsBoardContent() {
                   <th className="px-4 py-3">Origin</th>
                   <th className="px-4 py-3 text-amber-400">Destination</th>
                   <th className="px-4 py-3">Scheduled ETA</th>
-                  <th className="px-4 py-3 bg-amber-400/5 text-amber-300 font-black">
-                    Predicted ETA (ML)
+                  <th className="px-4 py-3 bg-amber-400/5 text-amber-300 font-black min-w-[240px]">
+                    Predicted ETA & Uncertainty Window
                   </th>
                   <th className="px-4 py-3">In</th>
                   <th className="px-4 py-3 text-center">Delay / Status</th>
@@ -376,25 +377,28 @@ function StationArrivalsBoardContent() {
 
                       {/* 4. Scheduled ETA */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className="font-mono text-sm text-slate-300 font-semibold">
-                          {formatTime(item.scheduled_eta)}
+                        <div className="font-mono text-sm text-slate-300 font-semibold flex items-center space-x-1.5">
+                          <span className="px-1 py-0.2 rounded text-[9px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                            SCHED
+                          </span>
+                          <span>{formatTime(item.scheduled_eta)}</span>
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                           {formatDateTime(item.scheduled_eta).split(",")[0]}
                         </div>
                       </td>
 
-                      {/* 5. Predicted ETA (ML) */}
+                      {/* 5. Predicted ETA (ML) & Uncertainty Window */}
                       <td className="px-4 py-3.5 whitespace-nowrap bg-amber-400/5 border-x border-amber-500/20">
-                        <div className="font-mono text-base font-black text-amber-300 tracking-widest drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]">
-                          {formatTime(item.ml_eta || item.baseline_eta)}
-                        </div>
-                        {item.confidence_range && (
-                          <div className="text-[11px] text-amber-400/80 font-mono mt-0.5">
-                            [{formatTime(item.confidence_lower)} -{" "}
-                            {formatTime(item.confidence_upper)}]
-                          </div>
-                        )}
+                        <UncertaintyRangeBar
+                          mlEta={item.ml_eta || item.baseline_eta}
+                          lowerBound={item.confidence_lower}
+                          upperBound={item.confidence_upper}
+                          marginMinutes={item.confidence_range?.margin_minutes}
+                          segmentsAhead={item.segments_ahead}
+                          variant="table"
+                          theme="dark"
+                        />
                       </td>
 
                       {/* Minutes to Arrival */}

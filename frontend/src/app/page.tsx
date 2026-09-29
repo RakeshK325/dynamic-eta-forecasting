@@ -12,6 +12,10 @@ import {
   DemoScenarioResponse,
   DemoActionResult,
 } from "@/types/api";
+import UncertaintyRangeBar from "@/components/UncertaintyRangeBar";
+import { StatusBadge, DataSourceBadge } from "@/components/StatusBadge";
+import EtaComparisonBadge from "@/components/EtaComparisonBadge";
+import { CardSkeleton, TableRowSkeleton } from "@/components/LoadingSkeleton";
 
 /**
  * Pure SVG Sparkline Component visualizing historical delay progression & slope.
@@ -112,6 +116,8 @@ export default function ControlRoomDashboard() {
 
   // View state: "table" | "cards"
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "RUNNING" | "HALTED">("ALL");
 
   // Configurable Polling (conservative default: 15s)
   const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(15000);
@@ -288,6 +294,25 @@ export default function ControlRoomDashboard() {
   const modelMae = metrics?.ml_mae ?? metrics?.metrics_by_horizon?.["1_station_ahead"]?.ml_mae ?? null;
   const baselineMae = metrics?.baseline_mae ?? metrics?.metrics_by_horizon?.["1_station_ahead"]?.baseline_mae ?? null;
 
+  // Filtered Trains computation
+  const filteredTrains = trains.filter((t) => {
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      t.train_number.toLowerCase().includes(q) ||
+      t.name.toLowerCase().includes(q) ||
+      (t.current_station && t.current_station.toLowerCase().includes(q)) ||
+      (t.next_station && t.next_station.toLowerCase().includes(q));
+
+    const status = t.current_state?.status || "RUNNING";
+    const matchesStatus =
+      statusFilter === "ALL" ||
+      (statusFilter === "RUNNING" && status === "RUNNING") ||
+      (statusFilter === "HALTED" && status === "HALTED");
+
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div className="space-y-8">
       {/* Page Header with Polling Control */}
@@ -389,85 +414,100 @@ export default function ControlRoomDashboard() {
 
       {/* TOP SUMMARY STATS CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Stat 1: Running Trains */}
-        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-2xs">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            Running Trains
-          </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-slate-900 font-mono">
-              {runningTrainsCount}
-            </span>
-            <span className="text-xs text-slate-400 font-medium">
-              / {trains.length} total managed
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-slate-500 flex items-center space-x-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Active in simulator</span>
-          </div>
-        </div>
+        {loading && trains.length === 0 ? (
+          <>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </>
+        ) : (
+          <>
+            {/* Stat 1: Running Trains */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                <span>Active Fleet</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+              <div className="mt-2 flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
+                  {runningTrainsCount}
+                </span>
+                <span className="text-xs text-slate-400 font-medium font-mono">
+                  / {trains.length} total
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] text-slate-500 flex items-center space-x-1">
+                <span className="font-semibold text-slate-700">{runningTrainsCount}</span>
+                <span>running on track</span>
+              </div>
+            </div>
 
-        {/* Stat 2: Average Delay */}
-        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-2xs">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            Average Delay
-          </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span
-              className={`text-3xl font-extrabold font-mono ${
-                averageDelayMin > 15
-                  ? "text-rose-600"
-                  : averageDelayMin > 5
-                  ? "text-amber-600"
-                  : "text-emerald-700"
-              }`}
-            >
-              +{averageDelayMin.toFixed(1)}m
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-slate-500">
-            Across active network fleet
-          </div>
-        </div>
+            {/* Stat 2: Average Delay */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Fleet Average Delay
+              </div>
+              <div className="mt-2 flex items-baseline space-x-2">
+                <span
+                  className={`text-2xl sm:text-3xl font-extrabold font-mono tracking-tight ${
+                    averageDelayMin > 15
+                      ? "text-rose-600"
+                      : averageDelayMin > 5
+                      ? "text-amber-600"
+                      : "text-emerald-700"
+                  }`}
+                >
+                  +{averageDelayMin.toFixed(1)}m
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] text-slate-500">
+                Network operational delay
+              </div>
+            </div>
 
-        {/* Stat 3: Model MAE */}
-        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-2xs">
-          <div className="text-xs font-semibold text-blue-900 uppercase tracking-wider flex items-center justify-between">
-            <span>Model MAE</span>
-            <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-bold">
-              XGBoost
-            </span>
-          </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-blue-700 font-mono">
-              {modelMae !== null ? `${modelMae.toFixed(1)}m` : "--"}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-slate-500">
-            Held-out test set accuracy
-          </div>
-        </div>
+            {/* Stat 3: Model MAE */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-blue-200/80 bg-linear-to-b from-blue-50/20 to-transparent shadow-2xs hover:border-blue-300 transition-colors">
+              <div className="text-[11px] font-bold text-blue-900 uppercase tracking-wider flex items-center justify-between">
+                <span>XGBoost ML MAE</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-bold border border-blue-200">
+                  ML
+                </span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-blue-700 font-mono tracking-tight">
+                  {modelMae !== null ? `${modelMae.toFixed(1)}m` : "--"}
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] text-slate-500 flex items-center justify-between">
+                <span>1-Station test error</span>
+                <Link href="/model-performance" className="text-blue-600 hover:underline font-medium">
+                  View &rarr;
+                </Link>
+              </div>
+            </div>
 
-        {/* Stat 4: Baseline MAE */}
-        <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-2xs">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-            <span>Baseline MAE</span>
-            <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded font-bold">
-              Heuristic
-            </span>
-          </div>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-3xl font-extrabold text-slate-700 font-mono">
-              {baselineMae !== null ? `${baselineMae.toFixed(1)}m` : "--"}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-slate-500">
-            {metrics?.overall?.percentage_improvement
-              ? `ML improved by +${metrics.overall.percentage_improvement.toFixed(0)}%`
-              : "Timetable + delay heuristic"}
-          </div>
-        </div>
+            {/* Stat 4: Baseline MAE */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                <span>Heuristic MAE</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded font-bold border border-slate-200">
+                  Baseline
+                </span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-700 font-mono tracking-tight">
+                  {baselineMae !== null ? `${baselineMae.toFixed(1)}m` : "--"}
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] text-slate-500 truncate">
+                {metrics?.overall?.percentage_improvement
+                  ? `ML beats baseline by +${metrics.overall.percentage_improvement.toFixed(0)}%`
+                  : "Speed heuristic error"}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ERROR BANNER (Initial Load Failure) */}
@@ -515,62 +555,158 @@ export default function ControlRoomDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column (2 Cols): Train Table / Cards */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-lg border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
             {/* Table Header Bar */}
-            <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">
-                  Fleet Monitor & Next-Station ML ETAs
+                <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                  <span>🚆</span>
+                  <span>Active Fleet Operations & ETA Forecasting</span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Click any train row or card to open comprehensive multi-station predictions.
+                  Real-time telemetry, baseline heuristic ETAs, and chained XGBoost forecasts.
                 </p>
               </div>
 
               {/* View Toggle */}
-              <div className="inline-flex rounded-md shadow-2xs border border-slate-300 overflow-hidden text-xs">
+              <div className="inline-flex rounded-lg shadow-2xs border border-slate-300 overflow-hidden text-xs bg-white self-start sm:self-auto">
                 <button
                   onClick={() => setViewMode("table")}
-                  className={`px-3 py-1 font-medium transition-colors ${
+                  className={`px-3 py-1.5 font-semibold transition-colors flex items-center space-x-1.5 ${
                     viewMode === "table"
                       ? "bg-slate-900 text-white"
                       : "bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  Table View
+                  <span>▦</span>
+                  <span>Table View</span>
                 </button>
                 <button
                   onClick={() => setViewMode("cards")}
-                  className={`px-3 py-1 font-medium transition-colors ${
+                  className={`px-3 py-1.5 font-semibold transition-colors flex items-center space-x-1.5 ${
                     viewMode === "cards"
                       ? "bg-slate-900 text-white"
                       : "bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  Cards View
+                  <span>🗂️</span>
+                  <span>Cards View</span>
                 </button>
+              </div>
+            </div>
+
+            {/* ETA Tier Legend Strip */}
+            <div className="px-5 py-2.5 bg-slate-100/60 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                ETA Prediction Tiers:
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center space-x-1.5">
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-200 text-slate-700 border border-slate-300 uppercase">
+                    SCHED
+                  </span>
+                  <span className="text-[11px] text-slate-600">Fixed Timetable</span>
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 uppercase">
+                    BASELINE
+                  </span>
+                  <span className="text-[11px] text-slate-600">Speed Heuristic</span>
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-600 text-white uppercase">
+                    ML ETA
+                  </span>
+                  <span className="text-[11px] text-blue-900 font-semibold">XGBoost Forecast + Uncertainty Range</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Fleet Filter & Search Toolbar */}
+            <div className="px-5 py-3 border-b border-slate-200/80 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="relative flex-1 max-w-sm">
+                <input
+                  type="text"
+                  placeholder="Filter train # or station..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs border border-slate-300 rounded-lg bg-slate-50/50 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden transition-all"
+                />
+                <span className="absolute left-2.5 top-2 text-xs text-slate-400">
+                  🔍
+                </span>
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-1.5 text-xs text-slate-400 hover:text-slate-600"
+                    title="Clear filter"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter Chips */}
+              <div className="flex items-center space-x-1 text-xs">
+                {(["ALL", "RUNNING", "HALTED"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setStatusFilter(filter)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                      statusFilter === filter
+                        ? "bg-slate-900 text-white shadow-2xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {filter === "ALL"
+                      ? `All (${trains.length})`
+                      : filter === "RUNNING"
+                      ? `Running (${trains.filter((t) => t.current_state?.status === "RUNNING").length})`
+                      : `Halted (${trains.filter((t) => t.current_state?.status === "HALTED").length})`}
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Loading State */}
             {loading && trains.length === 0 ? (
-              <div className="p-12 text-center text-sm text-slate-500">
-                <div className="inline-block animate-spin text-xl mb-2">⏳</div>
-                <p>Loading fleet state and XGBoost forecasts from FastAPI...</p>
+              <div className="p-4">
+                <table className="min-w-full">
+                  <tbody>
+                    <TableRowSkeleton cols={9} />
+                    <TableRowSkeleton cols={9} />
+                    <TableRowSkeleton cols={9} />
+                    <TableRowSkeleton cols={9} />
+                  </tbody>
+                </table>
               </div>
-            ) : trains.length === 0 ? (
+            ) : filteredTrains.length === 0 ? (
               /* Empty Data State */
-              <div className="p-12 text-center text-sm text-slate-500">
-                <p className="font-semibold text-slate-700">No Trains Found</p>
-                <p className="text-xs text-slate-400 mt-1">
-                  The backend database has no trains seeded or the simulator is empty.
+              <div className="p-12 text-center text-sm text-slate-500 space-y-2">
+                <div className="text-3xl">🔍</div>
+                <p className="font-semibold text-slate-800">No matching trains found</p>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  {trains.length === 0
+                    ? "The backend database has no trains seeded or the simulator is empty."
+                    : "No trains match your search criteria. Try clearing the filter or query."}
                 </p>
+                {searchQuery || statusFilter !== "ALL" ? (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setStatusFilter("ALL");
+                    }}
+                    className="mt-2 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
+                  >
+                    Clear Filters
+                  </button>
+                ) : null}
               </div>
             ) : viewMode === "table" ? (
               /* Table View */
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto custom-scrollbar">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-slate-600 text-xs font-semibold uppercase tracking-wider text-left">
+                  <thead className="bg-slate-50/90 text-slate-600 text-[11px] font-bold uppercase tracking-wider text-left">
                     <tr>
                       <th className="px-4 py-3">Train</th>
                       <th className="px-3 py-3">Source</th>
@@ -579,75 +715,57 @@ export default function ControlRoomDashboard() {
                       <th className="px-3 py-3">Delay Trend</th>
                       <th className="px-3 py-3">Next Station</th>
                       <th className="px-3 py-3">Baseline ETA</th>
-                      <th className="px-4 py-3 bg-blue-50/50 text-blue-900">Next ML ETA</th>
+                      <th className="px-4 py-3 bg-blue-50/60 text-blue-900 min-w-[240px]">
+                        Next ML ETA & Uncertainty Window
+                      </th>
                       <th className="px-3 py-3">Last Updated</th>
                       <th className="px-3 py-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {trains.map((train) => {
+                    {filteredTrains.map((train) => {
                       const state = train.current_state;
                       const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
                       const delayInfo = formatDelay(delayVal);
-                      const isHalted = state?.status === "HALTED";
 
                       return (
                         <tr
                           key={train.id}
                           onClick={() => router.push(`/trains/${encodeURIComponent(train.train_number)}`)}
-                          className="hover:bg-blue-50/40 cursor-pointer transition-colors"
+                          className="hover:bg-blue-50/40 cursor-pointer transition-colors group"
                         >
                           {/* Train Number & Name */}
-                          <td className="px-4 py-3">
-                            <div className="font-bold text-slate-900 flex items-center space-x-1.5">
+                          <td className="px-4 py-3.5">
+                            <div className="font-bold text-slate-900 flex items-center space-x-2">
                               <span>{train.train_number}</span>
-                              <span
-                                className={`w-2 h-2 rounded-full ${
-                                  isHalted
-                                    ? "bg-rose-500"
-                                    : state?.status === "RUNNING"
-                                    ? "bg-emerald-500"
-                                    : "bg-slate-400"
-                                }`}
-                              />
+                              <StatusBadge status={state?.status} size="sm" />
                             </div>
-                            <div className="text-xs text-slate-500 truncate max-w-[140px]">
+                            <div className="text-xs text-slate-500 truncate max-w-[140px] mt-0.5">
                               {train.name}
                             </div>
                           </td>
 
                           {/* Data Source Badge */}
-                          <td className="px-3 py-3 whitespace-nowrap">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${
-                                train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
-                                  ? "bg-purple-50 text-purple-700 border-purple-200"
-                                  : "bg-slate-100 text-slate-700 border-slate-200"
-                              }`}
-                            >
-                              {train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
-                                ? "LIVE"
-                                : "SIMULATOR"}
-                              {train.is_fallback && (
-                                <span className="ml-1 text-[9px] text-amber-600 font-bold" title="Fell back to simulator">
-                                  (FB)
-                                </span>
-                              )}
-                            </span>
+                          <td className="px-3 py-3.5 whitespace-nowrap">
+                            <DataSourceBadge
+                              source={train.data_source}
+                              mode={train.data_source_mode}
+                              isFallback={train.is_fallback}
+                            />
                           </td>
 
                           {/* Current Station */}
-                          <td className="px-3 py-3">
+                          <td className="px-3 py-3.5">
                             <div className="font-semibold text-slate-800">
                               {train.current_station || state?.current_station_code || "Origin"}
                             </div>
-                            <div className="text-[11px] text-slate-400 font-mono">
+                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                               {state?.speed_kmh !== undefined ? `${state.speed_kmh.toFixed(0)} km/h` : "0 km/h"}
                             </div>
                           </td>
 
                           {/* Current Delay */}
-                          <td className="px-3 py-3">
+                          <td className="px-3 py-3.5">
                             <span
                               className={`inline-block px-2.5 py-0.5 text-xs font-semibold border rounded ${delayInfo.colorClass}`}
                             >
@@ -656,7 +774,7 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Delay Trend Sparkline */}
-                          <td className="px-3 py-3">
+                          <td className="px-3 py-3.5">
                             <DelayTrendSparkline
                               history={train.delay_history || [delayVal]}
                               trend={train.delay_trend ?? 0}
@@ -664,56 +782,41 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Next Station */}
-                          <td className="px-3 py-3">
+                          <td className="px-3 py-3.5">
                             <div className="font-semibold text-slate-800">
                               {train.next_station || state?.next_station_code || "Terminus"}
                             </div>
                             {state?.next_station_distance_km !== null && state?.next_station_distance_km !== undefined && (
-                              <div className="text-[11px] text-slate-400">
+                              <div className="text-[11px] text-slate-400 mt-0.5">
                                 {state.next_station_distance_km.toFixed(1)} km to go
                               </div>
                             )}
                           </td>
 
                           {/* Baseline ETA */}
-                          <td className="px-3 py-3 font-mono text-xs">
-                            {train.baseline_eta ? (
-                              <div>
-                                <div className="font-semibold text-slate-700">
-                                  {formatTime(train.baseline_eta)}
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  {formatDateTime(train.baseline_eta)}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400">--:--</span>
-                            )}
+                          <td className="px-3 py-3.5 whitespace-nowrap">
+                            <EtaComparisonBadge type="baseline" time={train.baseline_eta} size="sm" />
                           </td>
 
-                          {/* Next ML ETA */}
-                          <td className="px-4 py-3 bg-blue-50/20">
+                          {/* Next ML ETA & Prediction Uncertainty */}
+                          <td className="px-4 py-3.5 bg-blue-50/20">
                             {train.ml_eta ? (
-                              <div>
-                                <div className="font-bold text-sm text-blue-700 font-mono">
-                                  {formatTime(train.ml_eta)}
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  {formatDateTime(train.ml_eta)}
-                                </div>
-                                {train.confidence_range && (
-                                  <div className="text-[10px] text-blue-600 font-sans mt-0.5">
-                                    &plusmn;{train.confidence_range.margin_minutes.toFixed(0)}m conf
-                                  </div>
-                                )}
-                              </div>
+                              <UncertaintyRangeBar
+                                mlEta={train.ml_eta}
+                                lowerBound={train.confidence_range?.lower_bound}
+                                upperBound={train.confidence_range?.upper_bound}
+                                marginMinutes={train.confidence_range?.margin_minutes}
+                                segmentsAhead={1}
+                                variant="table"
+                                theme="light"
+                              />
                             ) : (
-                              <span className="text-xs text-slate-400">--:--</span>
+                              <span className="text-xs text-slate-400 font-mono">--:--</span>
                             )}
                           </td>
 
                           {/* Last Updated */}
-                          <td className="px-3 py-3 text-[11px] text-slate-500 font-mono whitespace-nowrap">
+                          <td className="px-3 py-3.5 text-[11px] text-slate-500 font-mono whitespace-nowrap">
                             {train.last_updated
                               ? formatTime(train.last_updated)
                               : lastRefreshed
@@ -722,9 +825,9 @@ export default function ControlRoomDashboard() {
                           </td>
 
                           {/* Action */}
-                          <td className="px-3 py-3 text-right">
-                            <span className="inline-block text-xs font-semibold text-blue-600 group-hover:underline">
-                              View Details &rarr;
+                          <td className="px-3 py-3.5 text-right whitespace-nowrap">
+                            <span className="inline-flex items-center text-xs font-semibold text-blue-600 group-hover:text-blue-800 group-hover:underline">
+                              Forecast &rarr;
                             </span>
                           </td>
                         </tr>
@@ -736,45 +839,29 @@ export default function ControlRoomDashboard() {
             ) : (
               /* Cards View */
               <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {trains.map((train) => {
+                {filteredTrains.map((train) => {
                   const state = train.current_state;
                   const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
                   const delayInfo = formatDelay(delayVal);
-                  const isHalted = state?.status === "HALTED";
 
                   return (
                     <div
                       key={train.id}
                       onClick={() => router.push(`/trains/${encodeURIComponent(train.train_number)}`)}
-                      className="p-4 rounded-lg border border-slate-200 hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer bg-white space-y-3"
+                      className="p-4 rounded-xl border border-slate-200 hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer bg-white space-y-3 group"
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="font-bold text-base text-slate-900 flex items-center space-x-1.5">
+                          <div className="font-bold text-base text-slate-900 flex items-center space-x-2">
                             <span>{train.train_number}</span>
-                            <span
-                              className={`w-2.5 h-2.5 rounded-full ${
-                                isHalted
-                                  ? "bg-rose-500"
-                                  : state?.status === "RUNNING"
-                                  ? "bg-emerald-500"
-                                  : "bg-slate-400"
-                              }`}
+                            <StatusBadge status={state?.status} size="sm" />
+                            <DataSourceBadge
+                              source={train.data_source}
+                              mode={train.data_source_mode}
+                              isFallback={train.is_fallback}
                             />
-                            <span
-                              className={`inline-block px-1.5 py-0.2 text-[10px] font-semibold rounded border ${
-                                train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
-                                  ? "bg-purple-50 text-purple-700 border-purple-200"
-                                  : "bg-slate-100 text-slate-700 border-slate-200"
-                              }`}
-                            >
-                              {train.data_source_mode === "LIVE_API" || train.data_source === "external_api"
-                                ? "LIVE"
-                                : "SIM"}
-                              {train.is_fallback && <span className="text-amber-600 font-bold ml-0.5">(FB)</span>}
-                            </span>
                           </div>
-                          <div className="text-xs text-slate-500 line-clamp-1">
+                          <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">
                             {train.name}
                           </div>
                         </div>
@@ -800,27 +887,25 @@ export default function ControlRoomDashboard() {
                         </div>
                       </div>
 
-                      <div className="p-2.5 bg-blue-50/50 rounded border border-blue-100 grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <div className="text-slate-500 font-medium text-[10px]">
-                            Baseline ETA:
-                          </div>
-                          <div className="font-semibold text-slate-700 font-mono">
-                            {train.baseline_eta ? formatTime(train.baseline_eta) : "--:--"}
-                          </div>
+                      {/* ETA Comparison Box */}
+                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/70 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 font-medium">Baseline ETA:</span>
+                          <EtaComparisonBadge type="baseline" time={train.baseline_eta} size="sm" />
                         </div>
-                        <div>
-                          <div className="text-blue-900 font-medium text-[10px]">
-                            Next ML ETA:
+                        <div className="pt-1.5 border-t border-slate-200/60">
+                          <div className="text-[10px] uppercase font-bold text-blue-900 mb-1">
+                            Next ML Predicted Arrival:
                           </div>
-                          <div className="font-bold text-blue-700 text-sm font-mono">
-                            {train.ml_eta ? formatTime(train.ml_eta) : "--:--"}
-                          </div>
-                          {train.confidence_range && (
-                            <div className="text-[10px] text-blue-600 font-sans">
-                              &plusmn;{train.confidence_range.margin_minutes.toFixed(0)}m
-                            </div>
-                          )}
+                          <UncertaintyRangeBar
+                            mlEta={train.ml_eta}
+                            lowerBound={train.confidence_range?.lower_bound}
+                            upperBound={train.confidence_range?.upper_bound}
+                            marginMinutes={train.confidence_range?.margin_minutes}
+                            segmentsAhead={1}
+                            variant="table"
+                            theme="light"
+                          />
                         </div>
                       </div>
 

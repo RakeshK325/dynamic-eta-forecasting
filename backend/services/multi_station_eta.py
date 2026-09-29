@@ -232,13 +232,19 @@ class MultiStationETAService:
             else:
                 scheduled_segment_min = max(0.5, sched_to - sched_from)
 
-            # 1. XGBoost inference for this individual segment
-            feat = self.feature_builder.build(
-                train_state=active_state,
-                target_station_code=to_code,
-                route_stations=stops,
-            )
-            pred_seg_minutes = self.predictor.predict(feat)
+            # 1. XGBoost inference for this individual segment (with graceful baseline fallback)
+            is_ml_fallback = False
+            try:
+                feat = self.feature_builder.build(
+                    train_state=active_state,
+                    target_station_code=to_code,
+                    route_stations=stops,
+                )
+                pred_seg_minutes = self.predictor.predict(feat)
+            except Exception:
+                is_ml_fallback = True
+                avg_speed = max(20.0, min(130.0, float(active_state.speed_kmh or 60.0)))
+                pred_seg_minutes = max(scheduled_segment_min, (seg_distance / avg_speed) * 60.0)
 
             # Kinematic physical feasibility guard for this segment
             min_segment_minutes = (seg_distance / self.max_speed_kmh) * 60.0
@@ -315,10 +321,11 @@ class MultiStationETAService:
                 confidence_lower_bound_minutes=lower_bound_min,
                 confidence_upper_bound_minutes=upper_bound_min,
                 uncertainty_margin_minutes=uncertainty_margin,
-                method="XGBOOST_CHAINED",
+                method="BASELINE_FALLBACK" if is_ml_fallback else "XGBOOST_CHAINED",
                 confidence_disclaimer=(
-                    f"Uncalibrated heuristic MVP uncertainty interval widening with horizon "
-                    f"(+/- {self.base_uncertainty_minutes}m * sqrt({segments_ahead}) = +/- {uncertainty_margin}m)"
+                    "ML model unavailable. Operating in kinematic baseline fallback mode."
+                    if is_ml_fallback
+                    else f"Uncalibrated heuristic MVP uncertainty interval widening with horizon (+/- {self.base_uncertainty_minutes}m * sqrt({segments_ahead}) = +/- {uncertainty_margin}m)"
                 ),
                 generated_timestamp=datetime.now(timezone.utc),
                 segment_predictions=list(chained_segment_records),

@@ -8,6 +8,11 @@ from backend.simulator.events import SimulationEvent, EventType
 from backend.simulator.journey import SimulatedJourney, StationStop
 
 
+class SimulatorStoppedError(Exception):
+    """Raised when an operation is requested on a stopped or uninitialized simulator."""
+    pass
+
+
 class TrainSimulator:
     """
     Synthetic train-running simulation engine.
@@ -28,6 +33,15 @@ class TrainSimulator:
         self.sim_time = start_time or datetime.now(timezone.utc)
         self.db = db
         self.journeys: Dict[str, SimulatedJourney] = {}
+        self.is_running: bool = True
+
+    def stop(self) -> None:
+        """Stops/pauses the simulation engine."""
+        self.is_running = False
+
+    def start(self) -> None:
+        """Resumes/starts the simulation engine."""
+        self.is_running = True
 
     def set_simulation_speed(self, speed: float) -> None:
         """Sets the simulation speed multiplier (e.g., 1.0 = real-time, 10.0 = 10x, 60.0 = 1 min/sec)."""
@@ -143,6 +157,9 @@ class TrainSimulator:
         Advances all registered journeys by (step_seconds * simulation_speed) simulated seconds.
         Returns a mapping of train_number -> normalized TrainRunningState.
         """
+        if not self.is_running:
+            raise SimulatorStoppedError("Train simulator is currently stopped.")
+
         effective_seconds = step_seconds * self.simulation_speed
         self.sim_time += timedelta(seconds=effective_seconds)
 
@@ -170,6 +187,9 @@ class TrainSimulator:
         Injects an operational disruption event into the specified train's journey.
         Modifies delay and running state reproducibly, and optionally logs to SQLite.
         """
+        if not self.is_running:
+            raise SimulatorStoppedError("Cannot inject event: Train simulator is currently stopped.")
+
         journey = self.get_journey(train_number)
         if not journey:
             raise KeyError(f"Train '{train_number}' is not currently managed by the simulator.")
@@ -203,6 +223,8 @@ class TrainSimulator:
 
     def get_state(self, train_number: str) -> TrainRunningState:
         """Returns the current normalized TrainRunningState for a specific train."""
+        if not self.is_running:
+            raise SimulatorStoppedError("Train simulator is currently stopped.")
         journey = self.get_journey(train_number)
         if not journey:
             raise KeyError(f"Train '{train_number}' is not found in the simulator.")
