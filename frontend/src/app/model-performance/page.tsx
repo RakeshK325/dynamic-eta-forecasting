@@ -52,7 +52,7 @@ function MetricComparisonCard({
                 : "bg-amber-50 text-[#B77900] border-amber-200"
             }`}
           >
-            {isMlWinner ? `ML +${Math.abs(pctImprovement).toFixed(1)}%` : "Baseline wins"}
+            {isMlWinner ? `Lower Error: ML (-${Math.abs(pctImprovement).toFixed(1)}%)` : "Lower Error: Baseline"}
           </span>
         )}
       </div>
@@ -333,9 +333,9 @@ export default function ModelPerformancePage() {
                 </div>
 
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
-                  <span className="text-[#66717A] font-medium">Improvement:</span>
+                  <span className="text-[#66717A] font-medium">Error Reduction:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h1?.percentage_improvement?.toFixed(1)}% Error Reduction
+                    +{h1?.percentage_improvement?.toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -375,9 +375,9 @@ export default function ModelPerformancePage() {
                 </div>
 
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
-                  <span className="text-[#66717A] font-medium">Improvement:</span>
+                  <span className="text-[#66717A] font-medium">Error Reduction:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h3?.percentage_improvement?.toFixed(1)}% Error Reduction
+                    +{h3?.percentage_improvement?.toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -417,9 +417,9 @@ export default function ModelPerformancePage() {
                 </div>
 
                 <div className="pt-2 border-t border-[#D9DEE3]/70 flex items-center justify-between text-xs">
-                  <span className="text-[#66717A] font-medium">Improvement:</span>
+                  <span className="text-[#66717A] font-medium">Error Reduction:</span>
                   <span className="font-bold text-[#168A55] font-mono bg-[#EBF7EE] px-2 py-0.5 rounded border border-[#B4E2C1]">
-                    +{h5?.percentage_improvement?.toFixed(1)}% Error Reduction
+                    +{h5?.percentage_improvement?.toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -445,7 +445,7 @@ export default function ModelPerformancePage() {
                       <th className="px-3.5 py-2 text-[#2563A8]">ML MAE</th>
                       <th className="px-3.5 py-2">Baseline RMSE</th>
                       <th className="px-3.5 py-2 text-[#2563A8]">ML RMSE</th>
-                      <th className="px-3.5 py-2 text-right">Accuracy Gain</th>
+                      <th className="px-3.5 py-2 text-right">Error Reduction</th>
                       <th className="px-3.5 py-2 text-right">Lower Error</th>
                     </tr>
                   </thead>
