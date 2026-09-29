@@ -366,3 +366,32 @@ export interface DemoActionResult {
   active_events_count: number;
   message: string;
 }
+
+export interface LiveTrainResult {
+  train_number: string;
+  train_name: string;
+  status: string;
+  current_station: string | null;
+  next_station: string | null;
+  current_delay: number;
+  speed: number | null;
+  segment_progress: number | null;
+  timestamp: string;
+  baseline_eta: string | null;
+  ml_eta: string | null;
+  confidence_range?: {
+    lower_bound: string;
+    upper_bound: string;
+    margin_minutes: number;
+  } | null;
+  data_source: string;
+  last_updated?: string | null;
+  cached_at?: string | null;
+  is_cached?: boolean;
+  cache_age_seconds?: number | null;
+  cache_ttl_seconds?: number | null;
+  is_stale?: boolean;
+  features?: Record<string, unknown> | null;
+  feature_provenance?: Record<string, string> | null;
+  estimated_features?: string[] | null;
+}

@@ -16,6 +16,7 @@ import {
   DataSourceConfigResponse,
   DemoScenarioResponse,
   DemoActionResult,
+  LiveTrainResult,
 } from "@/types/api";
 
 const API_BASE_URL =
@@ -140,6 +141,13 @@ export const api = {
    */
   async getTrainById(trainId: string | number): Promise<TrainDetailResponse> {
     return this.getTrainDetails(trainId);
+  },
+
+  /**
+   * Fetch live train status and predicted ETAs via RailRadar integration.
+   */
+  async getLiveTrain(trainNumber: string): Promise<LiveTrainResult> {
+    return request<LiveTrainResult>(`/live/train/${encodeURIComponent(trainNumber.trim())}`);
   },
 
   /**

@@ -889,13 +889,88 @@ def get_train_details(
     sim: TrainSimulator = Depends(get_active_simulator),
     provider: TrainStateProvider = Depends(get_state_provider),
     eta_service: MultiStationETAService = Depends(get_multi_station_service),
+    lookup_service: LiveTrainLookupService = Depends(get_live_lookup_service),
 ):
     """
     Retrieves complete train information with live telemetry and multi-station ETA predictions.
     """
     train = find_train(db, train_id)
     if not train:
-        raise HTTPException(status_code=404, detail=f"Train '{train_id}' not found.")
+        clean_id = str(train_id).strip()
+        try:
+            live = lookup_service.lookup_live_train(clean_id, db=db)
+            c_eta = live.ml_eta or live.baseline_eta or live.timestamp
+            c_range = (
+                ConfidenceRange(
+                    lower_bound=live.confidence_range.lower_bound,
+                    upper_bound=live.confidence_range.upper_bound,
+                    margin_minutes=live.confidence_range.margin_minutes,
+                )
+                if live.confidence_range
+                else ConfidenceRange(
+                    lower_bound=c_eta,
+                    upper_bound=c_eta,
+                    margin_minutes=0.0,
+                )
+            )
+            up_stations = []
+            if live.next_station:
+                up_stations.append(UpcomingStationETA(
+                    station_code=live.next_station,
+                    station_name=live.next_station,
+                    station_sequence=1,
+                    distance_to_go_km=0.0,
+                    segments_ahead=1,
+                    intermediate_halts=0,
+                    scheduled_eta=c_eta,
+                    baseline_eta=c_eta,
+                    ml_eta=c_eta,
+                    predicted_eta=c_eta,
+                    scheduled_remaining_minutes=0.0,
+                    baseline_remaining_minutes=0.0,
+                    predicted_remaining_minutes=0.0,
+                    confidence_lower_bound=c_range.lower_bound,
+                    confidence_upper_bound=c_range.upper_bound,
+                    confidence_range=c_range,
+                    segment_predictions=[],
+                ))
+            c_state = TrainRunningState(
+                train_number=live.train_number,
+                journey_date=live.timestamp.date(),
+                train_name=live.train_name,
+                status=live.status,
+                current_station_code=live.current_station,
+                current_delay_minutes=live.current_delay,
+                next_station_code=live.next_station,
+                speed_kmh=live.speed or 0.0,
+                segment_progress=live.segment_progress or 0.0,
+                timestamp=live.timestamp,
+                source="external_api",
+            )
+            return TrainDetailResponse(
+                id=0,
+                train_number=live.train_number,
+                name=live.train_name,
+                train_type="EXPRESS",
+                route_id=0,
+                route_stations=[],
+                current_state=c_state,
+                current_station=live.current_station,
+                current_delay=live.current_delay,
+                current_delay_minutes=live.current_delay,
+                current_timestamp=live.timestamp,
+                upcoming_stations=up_stations,
+                scheduled_eta=c_eta,
+                baseline_eta=c_eta,
+                ml_eta=c_eta,
+                confidence_range=c_range,
+                segment_predictions=[],
+                active_events=[],
+                delay_history=[live.current_delay],
+                delay_trend=0.0,
+            )
+        except (TrainNotFoundError, Exception):
+            raise HTTPException(status_code=404, detail=f"Train '{train_id}' not found.")
 
     # 1. Running state via provider (SIMULATOR or LIVE_API with fallback)
     try:

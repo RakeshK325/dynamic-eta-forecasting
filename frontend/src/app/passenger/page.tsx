@@ -158,10 +158,15 @@ function PassengerViewContent() {
               <span className="w-1.5 h-1.5 rounded-full bg-[#2563A8] animate-ping" />
               <span>Updating Telemetry...</span>
             </span>
-          ) : (
+          ) : trainDetails?.current_state?.source === "external_api" ? (
             <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-[#EBF7EE] text-[#168A55] border border-[#B4E2C1]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#168A55] animate-pulse" />
+              <span>Live RailRadar Stream</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-[#F0F3F5] text-[#66717A] border border-[#D9DEE3]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#168A55]" />
-              <span>Live Railway Telemetry</span>
+              <span>Simulator Mode</span>
             </span>
           )}
           <button
@@ -197,10 +202,16 @@ function PassengerViewContent() {
           <div className="md:col-span-6 relative">
             <input
               type="text"
-              placeholder="Search train by number or name (e.g. 12302)..."
+              placeholder="Search train by number or name (e.g. 12302, 12951)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 text-xs border border-[#D9DEE3] rounded-md bg-[#F8FAFB] focus:bg-[#FFFFFF] focus:border-[#2563A8] focus:outline-none transition-all"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && searchQuery.trim()) {
+                  setSelectedTrainNumber(searchQuery.trim());
+                  setSearchQuery("");
+                }
+              }}
+              className="w-full pl-8 pr-3 py-2 text-xs border border-[#D9DEE3] rounded-md bg-[#F8FAFB] focus:bg-[#FFFFFF] focus:border-[#2563A8] focus:outline-none transition-all font-mono"
             />
             <span className="absolute left-2.5 top-2.5 text-xs text-[#8A949C]">
               🔍
@@ -241,31 +252,40 @@ function PassengerViewContent() {
 
         {/* Filtered suggestions list when typing */}
         {searchQuery.trim().length > 0 && (
-          <div className="max-h-40 overflow-y-auto divide-y divide-[#D9DEE3]/70 border border-[#D9DEE3] rounded-md text-xs bg-[#FFFFFF] shadow-sm">
-            {filteredTrains.length === 0 ? (
-              <div className="p-2.5 text-center text-[#8A949C]">
-                No matching trains found for &quot;{searchQuery}&quot;
-              </div>
-            ) : (
-              filteredTrains.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedTrainNumber(t.train_number);
-                    setSearchQuery("");
-                  }}
-                  className="w-full text-left px-3.5 py-2 hover:bg-[#F0F3F5] flex items-center justify-between transition-colors"
-                >
-                  <span className="font-semibold text-[#172026]">
-                    {t.train_number} &mdash; {t.name}
-                  </span>
-                  <span className="text-[11px] text-[#8A949C] font-mono">
-                    {t.current_station ? `At ${t.current_station}` : "Active"}
-                  </span>
-                </button>
-              ))
-            )}
+          <div className="max-h-48 overflow-y-auto divide-y divide-[#D9DEE3]/70 border border-[#D9DEE3] rounded-md text-xs bg-[#FFFFFF] shadow-sm">
+            {/* Live Search Option */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTrainNumber(searchQuery.trim());
+                setSearchQuery("");
+              }}
+              className="w-full text-left px-3.5 py-2 bg-[#EBF3FC]/60 hover:bg-[#EBF3FC] text-xs font-mono font-semibold text-[#2563A8] flex items-center justify-between transition-colors"
+            >
+              <span>📡 Track Live Train #{searchQuery.trim()}</span>
+              <span className="text-[10px] text-[#2563A8] font-bold uppercase bg-white px-2 py-0.5 rounded border border-[#BFDBFE]">
+                Live Radar &rarr;
+              </span>
+            </button>
+
+            {filteredTrains.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setSelectedTrainNumber(t.train_number);
+                  setSearchQuery("");
+                }}
+                className="w-full text-left px-3.5 py-2 hover:bg-[#F0F3F5] flex items-center justify-between transition-colors"
+              >
+                <span className="font-semibold text-[#172026]">
+                  {t.train_number} &mdash; {t.name}
+                </span>
+                <span className="text-[11px] text-[#8A949C] font-mono">
+                  {t.current_station ? `At ${t.current_station}` : "Active"}
+                </span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -343,9 +363,16 @@ function PassengerViewContent() {
                   <span>&bull;</span>
                   <span>Route #{trainDetails.route_id}</span>
                   <span>&bull;</span>
-                  <span className="font-mono text-[#8A949C]">
-                    Source: {trainDetails.current_state?.source === "external_api" ? "LIVE API" : "SIMULATOR"}
-                  </span>
+                  {trainDetails.current_state?.source === "external_api" ? (
+                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EBF7EE] text-[#168A55] border border-[#B4E2C1]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#168A55] animate-pulse" />
+                      <span>LIVE RADAR</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#F0F3F5] text-[#66717A] border border-[#D9DEE3]">
+                      <span>SIMULATOR</span>
+                    </span>
+                  )}
                 </div>
               </div>
 
