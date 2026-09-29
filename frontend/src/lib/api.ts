@@ -136,6 +136,13 @@ export const api = {
   },
 
   /**
+   * Alias for getTrainDetails.
+   */
+  async getTrainById(trainId: string | number): Promise<TrainDetailResponse> {
+    return this.getTrainDetails(trainId);
+  },
+
+  /**
    * Fetch single-station ETA prediction for a specific train and station.
    */
   async getStationETA(

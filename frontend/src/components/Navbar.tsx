@@ -8,7 +8,6 @@ import { api } from "@/lib/api";
 export default function Navbar() {
   const pathname = usePathname();
   const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
-  const [apiVersion, setApiVersion] = useState<string>("");
   const [clockTime, setClockTime] = useState<string>("");
 
   useEffect(() => {
@@ -35,7 +34,6 @@ export default function Navbar() {
         const res = await api.getHealth();
         if (isMounted) {
           setBackendStatus(res.status === "ok" ? "online" : "offline");
-          setApiVersion(res.version || "0.1.0");
         }
       } catch {
         if (isMounted) {
@@ -56,37 +54,48 @@ export default function Navbar() {
     { href: "/", label: "Control Room", shortLabel: "Control Room" },
     { href: "/passenger", label: "Passenger Lookup", shortLabel: "Passenger" },
     { href: "/station", label: "Station Board", shortLabel: "Station" },
-    { href: "/model-performance", label: "Model Evaluation", shortLabel: "Metrics" },
+    { href: "/model-performance", label: "Model Evaluation", shortLabel: "Evaluation" },
   ];
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16 gap-3">
-          {/* Logo & Operational System Tag */}
+    <header className="sticky top-0 z-40 bg-[#FFFFFF] border-b border-[#D9DEE3] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <div className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-14 sm:h-16 gap-3">
+          {/* Left: Brand & Operations Subtitle */}
           <div className="flex items-center space-x-3 shrink-0">
             <Link href="/" className="flex items-center space-x-2.5 group">
-              <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-base shadow-xs group-hover:bg-blue-600 transition-colors">
-                🚆
+              <div className="w-8 h-8 rounded-md border border-[#D9DEE3] bg-[#F0F3F5] text-[#172026] flex items-center justify-center text-sm shadow-xs group-hover:border-[#2563A8] transition-colors">
+                <svg
+                  className="w-4 h-4 text-[#172026]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="4" y="3" width="16" height="16" rx="2" />
+                  <path d="M4 11h16" />
+                  <path d="M12 3v8" />
+                  <path d="m8 19-2 3" />
+                  <path d="m16 19 2 3" />
+                  <circle cx="8" cy="15" r="1" />
+                  <circle cx="16" cy="15" r="1" />
+                </svg>
               </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
-                    Dynamic ETA
-                  </span>
-                  <span className="hidden sm:inline-block px-1.5 py-0.2 text-[10px] font-bold bg-blue-100 text-blue-800 rounded border border-blue-200 uppercase tracking-wider">
-                    v{apiVersion || "1.0"}
-                  </span>
-                </div>
-                <div className="text-[10px] text-slate-400 font-medium tracking-wider uppercase -mt-0.5 hidden sm:block">
-                  Railway Operational Intelligence
-                </div>
+              <div className="leading-tight">
+                <span className="font-bold text-[15px] sm:text-base text-[#172026] tracking-tight block">
+                  Dynamic ETA
+                </span>
+                <span className="text-[9px] text-[#66717A] font-semibold tracking-wider uppercase block">
+                  Railway Operations Intelligence
+                </span>
               </div>
             </Link>
           </div>
 
-          {/* Navigation Links */}
-          <nav className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto py-1 scrollbar-none">
+          {/* Center: Segmented Control Navigation */}
+          <nav className="flex items-center p-1 bg-[#F0F3F5] border border-[#D9DEE3] rounded-lg overflow-x-auto scrollbar-none">
             {navItems.map((item) => {
               const isActive =
                 item.href === "/"
@@ -96,10 +105,10 @@ export default function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-150 ${
+                  className={`px-3 sm:px-4 py-1.5 rounded-md text-xs sm:text-[13px] font-medium whitespace-nowrap transition-all duration-150 ${
                     isActive
-                      ? "bg-slate-900 text-white shadow-xs"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
+                      ? "bg-[#FFFFFF] text-[#172026] font-semibold shadow-xs border border-[#D9DEE3]"
+                      : "text-[#66717A] hover:text-[#172026] hover:bg-[#FFFFFF]/60 border border-transparent"
                   }`}
                 >
                   <span className="sm:hidden">{item.shortLabel}</span>
@@ -109,42 +118,39 @@ export default function Navbar() {
             })}
           </nav>
 
-          {/* Right Status Block: Live Clock & Backend Telemetry */}
-          <div className="hidden lg:flex items-center space-x-4 shrink-0 pl-2 border-l border-slate-200">
+          {/* Right: IST Clock & Backend Telemetry */}
+          <div className="flex items-center space-x-3.5 shrink-0">
             {/* Real-time Clock */}
-            <div className="text-right">
-              <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
+            <div className="hidden sm:block text-right">
+              <div className="text-[9px] uppercase tracking-wider text-[#8A949C] font-bold">
                 IST Clock
               </div>
-              <div className="text-xs font-mono font-bold text-slate-800 tracking-tight">
+              <div className="text-xs font-mono font-bold text-[#172026] tracking-tight">
                 {clockTime || "--:--:--"}
               </div>
             </div>
 
-            {/* Backend Status Dot */}
-            <div className="flex items-center space-x-1.5 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-md">
+            {/* FastAPI Status Pill */}
+            <div
+              className={`flex items-center space-x-1.5 text-xs px-2.5 py-1 rounded-md border font-medium ${
+                backendStatus === "online"
+                  ? "bg-[#EBF7EE] text-[#168A55] border-[#B4E2C1]"
+                  : backendStatus === "checking"
+                  ? "bg-amber-50 text-[#B77900] border-amber-200"
+                  : "bg-rose-50 text-[#D64545] border-rose-200"
+              }`}
+            >
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-1.5 h-1.5 rounded-full ${
                   backendStatus === "online"
-                    ? "bg-emerald-500 animate-pulse"
+                    ? "bg-[#168A55] animate-pulse"
                     : backendStatus === "checking"
-                    ? "bg-amber-400"
-                    : "bg-rose-500"
+                    ? "bg-[#B77900]"
+                    : "bg-[#D64545]"
                 }`}
               />
-              <span className="text-slate-600 font-mono text-[11px] font-semibold">
-                FastAPI:{" "}
-                <span
-                  className={
-                    backendStatus === "online"
-                      ? "text-emerald-700 font-bold"
-                      : backendStatus === "checking"
-                      ? "text-amber-700 font-bold"
-                      : "text-rose-700 font-bold"
-                  }
-                >
-                  {backendStatus.toUpperCase()}
-                </span>
+              <span className="font-mono text-[11px] font-semibold">
+                FastAPI: {backendStatus.toUpperCase()}
               </span>
             </div>
           </div>

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api, formatDelay, formatDateTime, formatTime } from "@/lib/api";
+import { api, formatDelay, formatTime } from "@/lib/api";
 import {
   TrainListItem,
   ModelMetricsResponse,
@@ -12,89 +12,7 @@ import {
   DemoScenarioResponse,
   DemoActionResult,
 } from "@/types/api";
-import UncertaintyRangeBar from "@/components/UncertaintyRangeBar";
-import { StatusBadge, DataSourceBadge } from "@/components/StatusBadge";
-import EtaComparisonBadge from "@/components/EtaComparisonBadge";
-import { CardSkeleton, TableRowSkeleton } from "@/components/LoadingSkeleton";
-
-/**
- * Pure SVG Sparkline Component visualizing historical delay progression & slope.
- */
-function DelayTrendSparkline({
-  history,
-  trend,
-}: {
-  history: number[];
-  trend: number;
-}) {
-  const dataPoints = history && history.length > 0 ? history : [0];
-  const width = 84;
-  const height = 24;
-
-  const maxVal = Math.max(...dataPoints, 5);
-  const minVal = Math.min(...dataPoints, 0);
-  const range = maxVal - minVal || 1;
-
-  const points = dataPoints
-    .map((val, idx) => {
-      const x =
-        dataPoints.length > 1
-          ? (idx / (dataPoints.length - 1)) * (width - 10) + 5
-          : width / 2;
-      const y = height - 5 - ((val - minVal) / range) * (height - 10);
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const strokeColor =
-    trend > 0 ? "#e11d48" : trend < 0 ? "#059669" : "#64748b";
-
-  return (
-    <div className="inline-flex items-center space-x-2">
-      <svg width={width} height={height} className="overflow-visible bg-slate-50/50 rounded px-1">
-        <polyline
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points}
-        />
-        {dataPoints.map((val, idx) => {
-          const x =
-            dataPoints.length > 1
-              ? (idx / (dataPoints.length - 1)) * (width - 10) + 5
-              : width / 2;
-          const y = height - 5 - ((val - minVal) / range) * (height - 10);
-          return (
-            <circle
-              key={idx}
-              cx={x}
-              cy={y}
-              r={idx === dataPoints.length - 1 ? 3 : 1.5}
-              fill={strokeColor}
-            />
-          );
-        })}
-      </svg>
-      <div className="text-[11px] font-mono whitespace-nowrap">
-        {trend > 0 ? (
-          <span className="text-rose-700 font-semibold" title="Delay increasing">
-            ↗ +{trend.toFixed(1)}m
-          </span>
-        ) : trend < 0 ? (
-          <span className="text-emerald-700 font-semibold" title="Recovering time">
-            ↘ {trend.toFixed(1)}m
-          </span>
-        ) : (
-          <span className="text-slate-500 font-medium" title="Stable delay">
-            → 0.0m
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+import { TableRowSkeleton, CardSkeleton } from "@/components/LoadingSkeleton";
 
 export default function ControlRoomDashboard() {
   const router = useRouter();
@@ -110,7 +28,7 @@ export default function ControlRoomDashboard() {
   const [staleError, setStaleError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
-  // Keep ref to trains to retain last successful state upon poll failure
+  // Retain trains across poll hiccups
   const trainsRef = useRef<TrainListItem[]>([]);
   trainsRef.current = trains;
 
@@ -119,10 +37,13 @@ export default function ControlRoomDashboard() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "RUNNING" | "HALTED">("ALL");
 
-  // Configurable Polling (conservative default: 15s)
-  const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(15000);
-  const [isPollingActive, setIsPollingActive] = useState<boolean>(true);
+  // Configurable Polling
+  const [pollingIntervalMs] = useState<number>(15000);
+  const [isPollingActive] = useState<boolean>(true);
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Simulation & Event Drawer State
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
 
   // Disruption simulation form
   const [selectedTrain, setSelectedTrain] = useState<string>("");
@@ -159,15 +80,9 @@ export default function ControlRoomDashboard() {
       ]);
 
       setTrains(trainsRes.trains);
-      if (metricsRes) {
-        setMetrics(metricsRes);
-      }
-      if (configRes) {
-        setDataSourceConfig(configRes);
-      }
-      if (demoRes) {
-        setDemoScenario(demoRes);
-      }
+      if (metricsRes) setMetrics(metricsRes);
+      if (configRes) setDataSourceConfig(configRes);
+      if (demoRes) setDemoScenario(demoRes);
       setLastRefreshed(new Date());
       setIsStale(false);
       setStaleError(null);
@@ -181,7 +96,6 @@ export default function ControlRoomDashboard() {
       if (isInitial && trainsRef.current.length === 0) {
         setError(msg);
       } else {
-        // Retain last successful state and display non-blocking stale warning
         setIsStale(true);
         setStaleError(msg);
       }
@@ -196,7 +110,7 @@ export default function ControlRoomDashboard() {
     fetchDashboardData(true);
   }, [fetchDashboardData]);
 
-  // Configurable Polling Hook
+  // Background polling
   useEffect(() => {
     if (!isPollingActive || pollingIntervalMs <= 0) {
       if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
@@ -235,7 +149,6 @@ export default function ControlRoomDashboard() {
       });
 
       setInjectionResult(res);
-      // Immediately pull fresh state
       await fetchDashboardData(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to inject disruption event";
@@ -245,7 +158,7 @@ export default function ControlRoomDashboard() {
     }
   };
 
-  // Deterministic Hackathon Demo Mode Handlers (Seed 42)
+  // Demo Actions
   const handleResetDemo = async () => {
     setDemoLoading(true);
     setDemoError(null);
@@ -277,22 +190,14 @@ export default function ControlRoomDashboard() {
     }
   };
 
-  // Top Summary Calculations
+  // Status Counts
+  const totalTrainsCount = trains.length;
   const runningTrainsCount = trains.filter(
-    (t) => t.current_state?.status === "RUNNING"
+    (t) => (t.current_state?.status || "RUNNING") === "RUNNING"
   ).length;
-
-  const activeDelays = trains
-    .filter((t) => t.current_state && t.current_state.status !== "COMPLETED")
-    .map((t) => t.current_delay_minutes ?? t.current_state?.current_delay_minutes ?? 0);
-
-  const averageDelayMin =
-    activeDelays.length > 0
-      ? activeDelays.reduce((acc, d) => acc + d, 0) / activeDelays.length
-      : 0.0;
-
-  const modelMae = metrics?.ml_mae ?? metrics?.metrics_by_horizon?.["1_station_ahead"]?.ml_mae ?? null;
-  const baselineMae = metrics?.baseline_mae ?? metrics?.metrics_by_horizon?.["1_station_ahead"]?.baseline_mae ?? null;
+  const haltedTrainsCount = trains.filter(
+    (t) => (t.current_state?.status || "") === "HALTED"
+  ).length;
 
   // Filtered Trains computation
   const filteredTrains = trains.filter((t) => {
@@ -314,1008 +219,650 @@ export default function ControlRoomDashboard() {
   });
 
   return (
-    <div className="space-y-8">
-      {/* Page Header with Polling Control */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-200 gap-4">
-        <div>
-          <div className="flex items-center space-x-2.5">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              Railway Control Room Dashboard
-            </h1>
-            {dataSourceConfig && (
-              <span
-                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
-                  dataSourceConfig.effective_mode === "LIVE_API"
-                    ? "bg-purple-100 text-purple-800 border border-purple-300"
-                    : "bg-blue-100 text-blue-800 border border-blue-300"
-                }`}
-                title={`Configured: ${dataSourceConfig.configured_mode} | Effective: ${dataSourceConfig.effective_mode}${dataSourceConfig.cache_active ? ` | Cache TTL: ${dataSourceConfig.cache_ttl_seconds}s` : ""}`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 mr-1.5 rounded-full ${
-                    dataSourceConfig.effective_mode === "LIVE_API" ? "bg-purple-600" : "bg-blue-600"
-                  }`}
-                />
-                {dataSourceConfig.effective_mode}
-                {dataSourceConfig.fallback_to_simulator && (
-                  <span className="ml-1 text-[10px] text-amber-700 font-normal">
-                    (Fallback Active)
-                  </span>
-                )}
-              </span>
-            )}
+    <div className="space-y-4">
+      {/* Non-blocking Stale Notification Banner */}
+      {isStale && (
+        <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-[#B77900] flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-[#B77900] animate-ping" />
+            <span>
+              <strong>Telemetry Polling Lag:</strong> Displaying cached fleet telemetry ({staleError || "Connection retry in progress"}).
+            </span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Real-time fleet operations, delay trends, and XGBoost machine-learning ETA forecasting.
+          <button
+            type="button"
+            onClick={() => fetchDashboardData(false)}
+            className="font-semibold underline hover:text-amber-900 ml-3"
+          >
+            Retry Now
+          </button>
+        </div>
+      )}
+
+      {/* Main Operations Header & Filter Tabs */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172026]">
+            Active Fleet Operations
+          </h1>
+          <p className="text-xs sm:text-[13px] text-[#66717A] mt-0.5">
+            Real-time telemetry, baseline heuristic ETAs, and chained XGBoost forecasts.
           </p>
         </div>
 
-        {/* Polling & Refresh Controls */}
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          {/* Subtle Updating Indicator */}
-          {isUpdating && (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
-              <span className="w-1.5 h-1.5 mr-1.5 rounded-full bg-blue-600 animate-ping" />
-              Updating...
-            </span>
-          )}
-
-          {/* Polling Status Toggle */}
-          <button
-            onClick={() => setIsPollingActive(!isPollingActive)}
-            className={`px-3 py-1.5 rounded font-medium border transition-colors flex items-center space-x-1.5 ${
-              isPollingActive
-                ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-                : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isPollingActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-              }`}
-            />
-            <span>{isPollingActive ? "Live Polling Active" : "Polling Paused"}</span>
-          </button>
-
-          {/* Configurable Interval Dropdown (Conservative Default) */}
-          <div className="flex items-center space-x-1 bg-white border border-slate-300 rounded px-2 py-1">
-            <span className="text-slate-500 font-medium">Interval:</span>
-            <select
-              value={pollingIntervalMs}
-              onChange={(e) => setPollingIntervalMs(Number(e.target.value))}
-              disabled={!isPollingActive}
-              className="bg-transparent font-mono text-slate-800 font-semibold focus:outline-hidden cursor-pointer"
-            >
-              <option value="5000">5s (Rapid)</option>
-              <option value="10000">10s (Standard)</option>
-              <option value="15000">15s (Default)</option>
-              <option value="30000">30s (Conservative)</option>
-              <option value="60000">60s (Slow)</option>
-            </select>
-          </div>
-
-          {/* Manual Refresh Button */}
-          <button
-            onClick={() => fetchDashboardData(false)}
-            disabled={isUpdating}
-            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded shadow-2xs transition-colors flex items-center space-x-1 disabled:opacity-50"
-          >
-            <span className={isUpdating ? "animate-spin" : ""}>🔄</span>
-            <span>Refresh Now</span>
-          </button>
-
-          {lastRefreshed && (
-            <span className="text-slate-400 font-mono text-[11px] hidden sm:inline">
-              Refreshed: {formatTime(lastRefreshed.toISOString())}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* TOP SUMMARY STATS CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {loading && trains.length === 0 ? (
-          <>
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
-          </>
-        ) : (
-          <>
-            {/* Stat 1: Running Trains */}
-            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
-              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Active Fleet</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              </div>
-              <div className="mt-2 flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-                  {runningTrainsCount}
-                </span>
-                <span className="text-xs text-slate-400 font-medium font-mono">
-                  / {trains.length} total
-                </span>
-              </div>
-              <div className="mt-1.5 text-[11px] text-slate-500 flex items-center space-x-1">
-                <span className="font-semibold text-slate-700">{runningTrainsCount}</span>
-                <span>running on track</span>
-              </div>
-            </div>
-
-            {/* Stat 2: Average Delay */}
-            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
-              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                Fleet Average Delay
-              </div>
-              <div className="mt-2 flex items-baseline space-x-2">
-                <span
-                  className={`text-2xl sm:text-3xl font-extrabold font-mono tracking-tight ${
-                    averageDelayMin > 15
-                      ? "text-rose-600"
-                      : averageDelayMin > 5
-                      ? "text-amber-600"
-                      : "text-emerald-700"
-                  }`}
-                >
-                  +{averageDelayMin.toFixed(1)}m
-                </span>
-              </div>
-              <div className="mt-1.5 text-[11px] text-slate-500">
-                Network operational delay
-              </div>
-            </div>
-
-            {/* Stat 3: Model MAE */}
-            <div className="bg-white p-4 sm:p-5 rounded-xl border border-blue-200/80 bg-linear-to-b from-blue-50/20 to-transparent shadow-2xs hover:border-blue-300 transition-colors">
-              <div className="text-[11px] font-bold text-blue-900 uppercase tracking-wider flex items-center justify-between">
-                <span>XGBoost ML MAE</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-bold border border-blue-200">
-                  ML
-                </span>
-              </div>
-              <div className="mt-2 flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-blue-700 font-mono tracking-tight">
-                  {modelMae !== null ? `${modelMae.toFixed(1)}m` : "--"}
-                </span>
-              </div>
-              <div className="mt-1.5 text-[11px] text-slate-500 flex items-center justify-between">
-                <span>1-Station test error</span>
-                <Link href="/model-performance" className="text-blue-600 hover:underline font-medium">
-                  View &rarr;
-                </Link>
-              </div>
-            </div>
-
-            {/* Stat 4: Baseline MAE */}
-            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
-              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Heuristic MAE</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded font-bold border border-slate-200">
-                  Baseline
-                </span>
-              </div>
-              <div className="mt-2 flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-slate-700 font-mono tracking-tight">
-                  {baselineMae !== null ? `${baselineMae.toFixed(1)}m` : "--"}
-                </span>
-              </div>
-              <div className="mt-1.5 text-[11px] text-slate-500 truncate">
-                {metrics?.overall?.percentage_improvement
-                  ? `ML beats baseline by +${metrics.overall.percentage_improvement.toFixed(0)}%`
-                  : "Speed heuristic error"}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ERROR BANNER (Initial Load Failure) */}
-      {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div>
-            <strong className="font-semibold">Backend Connection Issue:</strong>
-            <p className="font-mono text-xs mt-0.5">{error}</p>
-            <p className="text-xs text-slate-600 mt-1">
-              Ensure FastAPI backend is running on <code>http://localhost:8000</code>.
-            </p>
-          </div>
-          <button
-            onClick={() => fetchDashboardData(true)}
-            className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-medium text-xs rounded transition-colors"
-          >
-            Retry Connection
-          </button>
-        </div>
-      )}
-
-      {/* NON-BLOCKING STALE DATA WARNING BANNER */}
-      {isStale && (
-        <div className="p-3 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <div className="flex items-center space-x-2">
-            <span className="text-amber-600 font-bold text-base">⚠️</span>
-            <div>
-              <span className="font-semibold">Live Polling Interrupted:</span> Retaining last known fleet telemetry
-              {lastRefreshed && (
-                <span> from <strong>{lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</strong></span>
-              )}.
-              {staleError && <span className="text-amber-700 ml-1">({staleError})</span>}
-            </div>
-          </div>
-          <button
-            onClick={() => fetchDashboardData(false)}
-            className="px-3 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-semibold rounded text-xs transition-colors shrink-0"
-          >
-            Retry Sync
-          </button>
-        </div>
-      )}
-
-      {/* MAIN CONTENT: FLEET LIST & DISRUPTION CONTROLS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column (2 Cols): Train Table / Cards */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
-            {/* Table Header Bar */}
-            <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-                  <span>🚆</span>
-                  <span>Active Fleet Operations & ETA Forecasting</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Real-time telemetry, baseline heuristic ETAs, and chained XGBoost forecasts.
-                </p>
-              </div>
-
-              {/* View Toggle */}
-              <div className="inline-flex rounded-lg shadow-2xs border border-slate-300 overflow-hidden text-xs bg-white self-start sm:self-auto">
-                <button
-                  onClick={() => setViewMode("table")}
-                  className={`px-3 py-1.5 font-semibold transition-colors flex items-center space-x-1.5 ${
-                    viewMode === "table"
-                      ? "bg-slate-900 text-white"
-                      : "bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  <span>▦</span>
-                  <span>Table View</span>
-                </button>
-                <button
-                  onClick={() => setViewMode("cards")}
-                  className={`px-3 py-1.5 font-semibold transition-colors flex items-center space-x-1.5 ${
-                    viewMode === "cards"
-                      ? "bg-slate-900 text-white"
-                      : "bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  <span>🗂️</span>
-                  <span>Cards View</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ETA Tier Legend Strip */}
-            <div className="px-5 py-2.5 bg-slate-100/60 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                ETA Prediction Tiers:
-              </span>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center space-x-1.5">
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-200 text-slate-700 border border-slate-300 uppercase">
-                    SCHED
-                  </span>
-                  <span className="text-[11px] text-slate-600">Fixed Timetable</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 uppercase">
-                    BASELINE
-                  </span>
-                  <span className="text-[11px] text-slate-600">Speed Heuristic</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-600 text-white uppercase">
-                    ML ETA
-                  </span>
-                  <span className="text-[11px] text-blue-900 font-semibold">XGBoost Forecast + Uncertainty Range</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Fleet Filter & Search Toolbar */}
-            <div className="px-5 py-3 border-b border-slate-200/80 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="relative flex-1 max-w-sm">
-                <input
-                  type="text"
-                  placeholder="Filter train # or station..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 text-xs border border-slate-300 rounded-lg bg-slate-50/50 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden transition-all"
-                />
-                <span className="absolute left-2.5 top-2 text-xs text-slate-400">
-                  🔍
-                </span>
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-2.5 top-1.5 text-xs text-slate-400 hover:text-slate-600"
-                    title="Clear filter"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* Status Filter Chips */}
-              <div className="flex items-center space-x-1 text-xs">
-                {(["ALL", "RUNNING", "HALTED"] as const).map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setStatusFilter(filter)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                      statusFilter === filter
-                        ? "bg-slate-900 text-white shadow-2xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {filter === "ALL"
-                      ? `All (${trains.length})`
-                      : filter === "RUNNING"
-                      ? `Running (${trains.filter((t) => t.current_state?.status === "RUNNING").length})`
-                      : `Halted (${trains.filter((t) => t.current_state?.status === "HALTED").length})`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Loading State */}
-            {loading && trains.length === 0 ? (
-              <div className="p-4">
-                <table className="min-w-full">
-                  <tbody>
-                    <TableRowSkeleton cols={9} />
-                    <TableRowSkeleton cols={9} />
-                    <TableRowSkeleton cols={9} />
-                    <TableRowSkeleton cols={9} />
-                  </tbody>
-                </table>
-              </div>
-            ) : filteredTrains.length === 0 ? (
-              /* Empty Data State */
-              <div className="p-12 text-center text-sm text-slate-500 space-y-2">
-                <div className="text-3xl">🔍</div>
-                <p className="font-semibold text-slate-800">No matching trains found</p>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  {trains.length === 0
-                    ? "The backend database has no trains seeded or the simulator is empty."
-                    : "No trains match your search criteria. Try clearing the filter or query."}
-                </p>
-                {searchQuery || statusFilter !== "ALL" ? (
-                  <button
-                    onClick={() => {
-                      setSearchQuery("");
-                      setStatusFilter("ALL");
-                    }}
-                    className="mt-2 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
-                  >
-                    Clear Filters
-                  </button>
-                ) : null}
-              </div>
-            ) : viewMode === "table" ? (
-              /* Table View */
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50/90 text-slate-600 text-[11px] font-bold uppercase tracking-wider text-left">
-                    <tr>
-                      <th className="px-4 py-3">Train</th>
-                      <th className="px-3 py-3">Source</th>
-                      <th className="px-3 py-3">Current Station</th>
-                      <th className="px-3 py-3">Current Delay</th>
-                      <th className="px-3 py-3">Delay Trend</th>
-                      <th className="px-3 py-3">Next Station</th>
-                      <th className="px-3 py-3">Baseline ETA</th>
-                      <th className="px-4 py-3 bg-blue-50/60 text-blue-900 min-w-[240px]">
-                        Next ML ETA & Uncertainty Window
-                      </th>
-                      <th className="px-3 py-3">Last Updated</th>
-                      <th className="px-3 py-3 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {filteredTrains.map((train) => {
-                      const state = train.current_state;
-                      const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
-                      const delayInfo = formatDelay(delayVal);
-
-                      return (
-                        <tr
-                          key={train.id}
-                          onClick={() => router.push(`/trains/${encodeURIComponent(train.train_number)}`)}
-                          className="hover:bg-blue-50/40 cursor-pointer transition-colors group"
-                        >
-                          {/* Train Number & Name */}
-                          <td className="px-4 py-3.5">
-                            <div className="font-bold text-slate-900 flex items-center space-x-2">
-                              <span>{train.train_number}</span>
-                              <StatusBadge status={state?.status} size="sm" />
-                            </div>
-                            <div className="text-xs text-slate-500 truncate max-w-[140px] mt-0.5">
-                              {train.name}
-                            </div>
-                          </td>
-
-                          {/* Data Source Badge */}
-                          <td className="px-3 py-3.5 whitespace-nowrap">
-                            <DataSourceBadge
-                              source={train.data_source}
-                              mode={train.data_source_mode}
-                              isFallback={train.is_fallback}
-                            />
-                          </td>
-
-                          {/* Current Station */}
-                          <td className="px-3 py-3.5">
-                            <div className="font-semibold text-slate-800">
-                              {train.current_station || state?.current_station_code || "Origin"}
-                            </div>
-                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                              {state?.speed_kmh !== undefined ? `${state.speed_kmh.toFixed(0)} km/h` : "0 km/h"}
-                            </div>
-                          </td>
-
-                          {/* Current Delay */}
-                          <td className="px-3 py-3.5">
-                            <span
-                              className={`inline-block px-2.5 py-0.5 text-xs font-semibold border rounded ${delayInfo.colorClass}`}
-                            >
-                              {delayInfo.text}
-                            </span>
-                          </td>
-
-                          {/* Delay Trend Sparkline */}
-                          <td className="px-3 py-3.5">
-                            <DelayTrendSparkline
-                              history={train.delay_history || [delayVal]}
-                              trend={train.delay_trend ?? 0}
-                            />
-                          </td>
-
-                          {/* Next Station */}
-                          <td className="px-3 py-3.5">
-                            <div className="font-semibold text-slate-800">
-                              {train.next_station || state?.next_station_code || "Terminus"}
-                            </div>
-                            {state?.next_station_distance_km !== null && state?.next_station_distance_km !== undefined && (
-                              <div className="text-[11px] text-slate-400 mt-0.5">
-                                {state.next_station_distance_km.toFixed(1)} km to go
-                              </div>
-                            )}
-                          </td>
-
-                          {/* Baseline ETA */}
-                          <td className="px-3 py-3.5 whitespace-nowrap">
-                            <EtaComparisonBadge type="baseline" time={train.baseline_eta} size="sm" />
-                          </td>
-
-                          {/* Next ML ETA & Prediction Uncertainty */}
-                          <td className="px-4 py-3.5 bg-blue-50/20">
-                            {train.ml_eta ? (
-                              <UncertaintyRangeBar
-                                mlEta={train.ml_eta}
-                                lowerBound={train.confidence_range?.lower_bound}
-                                upperBound={train.confidence_range?.upper_bound}
-                                marginMinutes={train.confidence_range?.margin_minutes}
-                                segmentsAhead={1}
-                                variant="table"
-                                theme="light"
-                              />
-                            ) : (
-                              <span className="text-xs text-slate-400 font-mono">--:--</span>
-                            )}
-                          </td>
-
-                          {/* Last Updated */}
-                          <td className="px-3 py-3.5 text-[11px] text-slate-500 font-mono whitespace-nowrap">
-                            {train.last_updated
-                              ? formatTime(train.last_updated)
-                              : lastRefreshed
-                              ? formatTime(lastRefreshed.toISOString())
-                              : "--:--"}
-                          </td>
-
-                          {/* Action */}
-                          <td className="px-3 py-3.5 text-right whitespace-nowrap">
-                            <span className="inline-flex items-center text-xs font-semibold text-blue-600 group-hover:text-blue-800 group-hover:underline">
-                              Forecast &rarr;
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              /* Cards View */
-              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {filteredTrains.map((train) => {
-                  const state = train.current_state;
-                  const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
-                  const delayInfo = formatDelay(delayVal);
-
-                  return (
-                    <div
-                      key={train.id}
-                      onClick={() => router.push(`/trains/${encodeURIComponent(train.train_number)}`)}
-                      className="p-4 rounded-xl border border-slate-200 hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer bg-white space-y-3 group"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="font-bold text-base text-slate-900 flex items-center space-x-2">
-                            <span>{train.train_number}</span>
-                            <StatusBadge status={state?.status} size="sm" />
-                            <DataSourceBadge
-                              source={train.data_source}
-                              mode={train.data_source_mode}
-                              isFallback={train.is_fallback}
-                            />
-                          </div>
-                          <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">
-                            {train.name}
-                          </div>
-                        </div>
-                        <span
-                          className={`inline-block px-2 py-0.5 text-xs font-semibold border rounded ${delayInfo.colorClass}`}
-                        >
-                          {delayInfo.text}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
-                        <div>
-                          <span className="text-slate-400">Current:</span>{" "}
-                          <strong className="text-slate-800">
-                            {train.current_station || state?.current_station_code || "Origin"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span className="text-slate-400">Next:</span>{" "}
-                          <strong className="text-slate-800">
-                            {train.next_station || state?.next_station_code || "Terminus"}
-                          </strong>
-                        </div>
-                      </div>
-
-                      {/* ETA Comparison Box */}
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/70 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-500 font-medium">Baseline ETA:</span>
-                          <EtaComparisonBadge type="baseline" time={train.baseline_eta} size="sm" />
-                        </div>
-                        <div className="pt-1.5 border-t border-slate-200/60">
-                          <div className="text-[10px] uppercase font-bold text-blue-900 mb-1">
-                            Next ML Predicted Arrival:
-                          </div>
-                          <UncertaintyRangeBar
-                            mlEta={train.ml_eta}
-                            lowerBound={train.confidence_range?.lower_bound}
-                            upperBound={train.confidence_range?.upper_bound}
-                            marginMinutes={train.confidence_range?.margin_minutes}
-                            segmentsAhead={1}
-                            variant="table"
-                            theme="light"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-100 font-mono">
-                        <span>
-                          Updated: {train.last_updated ? formatTime(train.last_updated) : lastRefreshed ? formatTime(lastRefreshed.toISOString()) : "--:--"}
-                        </span>
-                        <DelayTrendSparkline
-                          history={train.delay_history || [delayVal]}
-                          trend={train.delay_trend ?? 0}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Operational Disruption Controls */}
-        <div className="space-y-6">
-          {/* Deterministic Hackathon Demo Mode Card */}
-          <div className="bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 rounded-lg border-2 border-indigo-200 shadow-xs p-5 space-y-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-lg">🎯</span>
-                  <h2 className="text-base font-bold text-slate-900">
-                    Hackathon Demo Mode
-                  </h2>
-                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
-                    SEED: 42
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 mt-1">
-                  Deterministic scenario with <strong>Train 12302</strong> on the NDLS-HWH trunk corridor.
-                  Evaluates the full pipeline: <em>Simulator &rarr; State &rarr; Feature &rarr; Baseline &rarr; ML ETA &rarr; Views</em>.
-                </p>
-              </div>
-            </div>
-
-            {/* Current Demo Scenario State Summary */}
-            {demoScenario && (
-              <div className="p-3 bg-white/90 rounded-md border border-indigo-100 text-xs space-y-2 shadow-2xs">
-                <div className="flex justify-between items-center text-slate-700">
-                  <span>
-                    Train: <strong>{demoScenario.train_number}</strong> ({demoScenario.current_station} &rarr; {demoScenario.next_station})
-                  </span>
-                  <span className="font-mono text-[11px] font-semibold text-indigo-700">
-                    {demoScenario.train_status} ({(demoScenario.current_speed_kmh ?? 0).toFixed(0)} km/h)
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-[11px] pt-1 border-t border-slate-100">
-                  <div>
-                    <span className="text-slate-500">Delay:</span>{" "}
-                    <strong className="text-rose-600 font-mono">
-                      +{(demoScenario.current_delay_minutes ?? 0).toFixed(1)}m
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Baseline:</span>{" "}
-                    <strong className="text-slate-800 font-mono">
-                      {formatTime(demoScenario.baseline_eta)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-indigo-600 font-medium">ML ETA:</span>{" "}
-                    <strong className="text-indigo-700 font-mono font-bold">
-                      {formatTime(demoScenario.ml_eta)}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Demo Reset Button */}
+        {/* Status Filter Segmented Controls & View Switcher */}
+        <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
+          <div className="flex items-center p-0.5 bg-[#F0F3F5] border border-[#D9DEE3] rounded-lg text-xs">
             <button
               type="button"
-              onClick={handleResetDemo}
-              disabled={demoLoading}
-              className="w-full py-2 px-3 rounded-md text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors flex items-center justify-center space-x-1.5 disabled:opacity-50"
+              onClick={() => setStatusFilter("ALL")}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center space-x-1.5 ${
+                statusFilter === "ALL"
+                  ? "bg-[#FFFFFF] text-[#172026] font-semibold shadow-2xs border border-[#D9DEE3]"
+                  : "text-[#66717A] hover:text-[#172026] border border-transparent"
+              }`}
             >
-              <span>{demoLoading ? "⏳" : "🔄"}</span>
-              <span>{demoLoading ? "Resetting Scenario..." : "Reset Demo Scenario (Seed 42)"}</span>
-            </button>
-
-            {/* 3 Prepared Demo Actions */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
-                Prepared Disruption Actions:
-              </label>
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleExecuteDemoAction("signal_halt")}
-                  disabled={demoActionActive !== null}
-                  className="w-full p-2.5 rounded-md text-left text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all flex items-center justify-between disabled:opacity-50 group"
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm">🔴</span>
-                    <div>
-                      <div className="font-bold text-rose-900 group-hover:text-rose-950">
-                        1. Signal Halt (+15m)
-                      </div>
-                      <div className="text-[10px] text-rose-700">
-                        Signal red &bull; Speed drops to 0 km/h &bull; Status: HALTED
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-rose-600 font-mono font-semibold">
-                    {demoActionActive === "signal_halt" ? "Running..." : "Inject &rarr;"}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleExecuteDemoAction("congestion")}
-                  disabled={demoActionActive !== null}
-                  className="w-full p-2.5 rounded-md text-left text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all flex items-center justify-between disabled:opacity-50 group"
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm">🟠</span>
-                    <div>
-                      <div className="font-bold text-amber-900 group-hover:text-amber-950">
-                        2. Line Congestion (+10m)
-                      </div>
-                      <div className="text-[10px] text-amber-700">
-                        Suburban block ahead &bull; Speed restricted to 49.5 km/h &bull; RUNNING
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-amber-600 font-mono font-semibold">
-                    {demoActionActive === "congestion" ? "Running..." : "Inject &rarr;"}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleExecuteDemoAction("speed_restriction")}
-                  disabled={demoActionActive !== null}
-                  className="w-full p-2.5 rounded-md text-left text-xs bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 transition-all flex items-center justify-between disabled:opacity-50 group"
-                >
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm">🟡</span>
-                    <div>
-                      <div className="font-bold text-yellow-900 group-hover:text-yellow-950">
-                        3. Speed Restriction (+8m)
-                      </div>
-                      <div className="text-[10px] text-yellow-700">
-                        Track maintenance zone &bull; Speed restricted to 30.0 km/h &bull; RUNNING
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-yellow-700 font-mono font-semibold">
-                    {demoActionActive === "speed_restriction" ? "Running..." : "Inject &rarr;"}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* Action Feedback Banner */}
-            {demoResult && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-md text-xs space-y-1.5 animate-fadeIn">
-                <div className="font-bold text-emerald-800 flex items-center space-x-1">
-                  <span>✓</span>
-                  <span>{demoResult.action_name} Executed</span>
-                </div>
-                <div className="text-slate-700 text-[11px]">
-                  <strong>New Delay:</strong> +{(demoResult.new_delay_minutes ?? 0).toFixed(1)}m &bull;{" "}
-                  <strong>Status:</strong> {demoResult.new_status} &bull;{" "}
-                  <strong>Speed:</strong> {(demoResult.speed_kmh ?? 0).toFixed(1)} km/h
-                </div>
-                <div className="text-[11px] font-mono text-slate-700 flex justify-between pt-1 border-t border-emerald-200/60">
-                  <span>Baseline: <strong>{formatTime(demoResult.baseline_eta)}</strong></span>
-                  <span className="text-indigo-800 font-bold">ML ETA: {formatTime(demoResult.ml_eta)}</span>
-                </div>
-              </div>
-            )}
-
-            {demoError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs">
-                <strong>Demo Error:</strong> {demoError}
-              </div>
-            )}
-
-            {/* Quick View Links to verify all 3 views */}
-            <div className="pt-2 border-t border-indigo-100">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                Verify Across All Views:
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 text-center">
-                <Link
-                  href="/trains/12302"
-                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
-                >
-                  Train 12302
-                </Link>
-                <Link
-                  href="/station?code=PRYJ"
-                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
-                >
-                  PRYJ Board
-                </Link>
-                <Link
-                  href="/passenger?train=12302"
-                  className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-blue-700 hover:underline"
-                >
-                  Passenger
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          {/* Disruption Event Injection Card */}
-          <div className="bg-white rounded-lg border border-slate-200 shadow-2xs p-5">
-            <h2 className="text-base font-semibold text-slate-900 mb-1 flex items-center">
-              <span className="mr-2">⚡</span> Disruption Simulator
-            </h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Inject disruptions into the simulator (`POST /simulate/event`) to test real-time ETA re-forecasting.
-            </p>
-
-            <form onSubmit={handleInjectEvent} className="space-y-3 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1 uppercase">
-                  Target Train
-                </label>
-                <select
-                  value={selectedTrain}
-                  onChange={(e) => setSelectedTrain(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                  required
-                >
-                  {trains.map((t) => (
-                    <option key={t.id} value={t.train_number}>
-                      {t.train_number} - {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1 uppercase">
-                  Event Disruption Type
-                </label>
-                <select
-                  value={eventType}
-                  onChange={(e) => setEventType(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                >
-                  <option value="SIGNAL_HALT">SIGNAL_HALT (Signal Stop)</option>
-                  <option value="CONGESTION">CONGESTION (Line Bottleneck)</option>
-                  <option value="SPEED_RESTRICTION">SPEED_RESTRICTION (Track Maintenance)</option>
-                  <option value="UNSCHEDULED_HALT">UNSCHEDULED_HALT (Ad-hoc Halt)</option>
-                  <option value="WEATHER">WEATHER (Fog / Adverse Weather)</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 uppercase">
-                    Delay (Min)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={delayMinutes}
-                    onChange={(e) => setDelayMinutes(Math.max(0, Number(e.target.value)))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden font-mono"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 uppercase">
-                    Severity
-                  </label>
-                  <select
-                    value={severity}
-                    onChange={(e) => setSeverity(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                  >
-                    <option value="LOW">LOW</option>
-                    <option value="MEDIUM">MEDIUM</option>
-                    <option value="HIGH">HIGH</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1 uppercase">
-                  Operational Reason / Note
-                </label>
-                <input
-                  type="text"
-                  value={locationNote}
-                  onChange={(e) => setLocationNote(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                  placeholder="e.g. Signal failure at junction"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submittingEvent || !selectedTrain}
-                className="w-full mt-2 py-2 px-4 rounded-md text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 transition-colors shadow-xs"
-              >
-                {submittingEvent ? "Injecting Disruption..." : "⚡ Inject Disruption Event"}
-              </button>
-            </form>
-
-            {injectionError && (
-              <div className="mt-3 p-3 text-xs bg-rose-50 border border-rose-200 text-rose-800 rounded">
-                <strong>Error:</strong> {injectionError}
-              </div>
-            )}
-
-            {injectionResult && (
-              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded text-xs space-y-1.5">
-                <div className="font-semibold text-emerald-800">
-                  ✓ {injectionResult.message}
-                </div>
-                <div className="text-slate-700">
-                  <strong>Train:</strong> {injectionResult.train_state.train_number} &bull;{" "}
-                  <strong>New Status:</strong> {injectionResult.train_state.status}
-                </div>
-                <div className="text-slate-700">
-                  <strong>New Delay:</strong> +{(injectionResult.train_state.current_delay_minutes ?? 0).toFixed(1)}m
-                </div>
-                <div className="text-slate-700">
-                  <strong>Updated ML ETA:</strong> {formatDateTime(injectionResult.ml_eta)}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Model Metrics Breakdown Card */}
-          <div className="bg-white rounded-lg border border-slate-200 shadow-2xs p-5 space-y-3">
-            <div className="flex justify-between items-center">
-              <h2 className="text-base font-semibold text-slate-900">
-                Model Evaluation Summary
-              </h2>
-              <span
-                className={`text-[11px] px-2 py-0.5 font-bold rounded ${
-                  metrics?.status === "AVAILABLE"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : "bg-slate-100 text-slate-600"
-                }`}
-              >
-                {metrics?.status || "UNKNOWN"}
+              <span>All</span>
+              <span className="px-1.5 py-0.2 rounded bg-[#F0F3F5] text-[11px] font-mono font-bold text-[#66717A]">
+                {totalTrainsCount}
               </span>
-            </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("RUNNING")}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center space-x-1.5 ${
+                statusFilter === "RUNNING"
+                  ? "bg-[#FFFFFF] text-[#172026] font-semibold shadow-2xs border border-[#D9DEE3]"
+                  : "text-[#66717A] hover:text-[#172026] border border-transparent"
+              }`}
+            >
+              <span>Running</span>
+              <span className="px-1.5 py-0.2 rounded bg-[#EBF7EE] text-[11px] font-mono font-bold text-[#168A55]">
+                {runningTrainsCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("HALTED")}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center space-x-1.5 ${
+                statusFilter === "HALTED"
+                  ? "bg-[#FFFFFF] text-[#172026] font-semibold shadow-2xs border border-[#D9DEE3]"
+                  : "text-[#66717A] hover:text-[#172026] border border-transparent"
+              }`}
+            >
+              <span>Halted</span>
+              <span className="px-1.5 py-0.2 rounded bg-[#FDF2F2] text-[11px] font-mono font-bold text-[#D64545]">
+                {haltedTrainsCount}
+              </span>
+            </button>
+          </div>
 
-            {metrics && metrics.is_available ? (
-              <div className="space-y-3 text-xs">
-                <div className="text-slate-600">
-                  <strong>Model:</strong> {metrics.model_name} (v{metrics.model_version})
-                </div>
+          {/* View Mode Toggle Button */}
+          <div className="flex items-center p-0.5 bg-[#F0F3F5] border border-[#D9DEE3] rounded-lg">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              title="Table View"
+              className={`p-1.5 rounded-md transition-all ${
+                viewMode === "table"
+                  ? "bg-[#FFFFFF] text-[#172026] shadow-2xs border border-[#D9DEE3]"
+                  : "text-[#66717A] hover:text-[#172026] border border-transparent"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("cards")}
+              title="Grid View"
+              className={`p-1.5 rounded-md transition-all ${
+                viewMode === "cards"
+                  ? "bg-[#FFFFFF] text-[#172026] shadow-2xs border border-[#D9DEE3]"
+                  : "text-[#66717A] hover:text-[#172026] border border-transparent"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
 
-                <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded border border-slate-200 text-center">
-                  <div>
-                    <div className="text-slate-400">Baseline MAE</div>
-                    <div className="font-bold text-sm text-slate-700">
-                      {metrics.baseline_mae !== null ? `${metrics.baseline_mae.toFixed(1)}m` : "--"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-blue-900 font-semibold">XGBoost ML MAE</div>
-                    <div className="font-bold text-sm text-blue-700">
-                      {metrics.ml_mae !== null ? `${metrics.ml_mae.toFixed(1)}m` : "--"}
-                    </div>
-                  </div>
-                </div>
+      {/* ETA Prediction Tiers Legend Bar */}
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4 py-2 px-3 bg-[#FFFFFF] border border-[#D9DEE3] rounded-lg text-xs text-[#66717A]">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A949C]">
+          ETA PREDICTION TIERS:
+        </span>
+        <div className="flex items-center space-x-1.5">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase bg-[#F0F3F5] text-[#66717A] border border-[#D9DEE3]">
+            SCHED
+          </span>
+          <span className="text-[#172026]">Fixed Timetable</span>
+        </div>
+        <div className="flex items-center space-x-1.5">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase bg-[#F5F7F8] text-[#172026] border border-[#D9DEE3]">
+            BASELINE
+          </span>
+          <span className="text-[#172026]">Speed heuristic</span>
+        </div>
+        <div className="flex items-center space-x-1.5">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase bg-[#EBF3FC] text-[#2563A8] border border-[#BFDBFE]">
+            ML ETA
+          </span>
+          <span className="text-[#2563A8] font-medium">XGBoost Forecast + Uncertainty Range</span>
+        </div>
+      </div>
 
-                {metrics.metrics_by_horizon && (
-                  <div>
-                    <div className="font-semibold text-slate-700 mb-1">
-                      By Forecasting Horizon:
-                    </div>
-                    <div className="space-y-1">
-                      {Object.entries(metrics.metrics_by_horizon).map(([key, val]) => (
-                        <div
-                          key={key}
-                          className="flex justify-between items-center py-1 border-b border-slate-100 text-[11px]"
-                        >
-                          <span className="text-slate-600 capitalize">
-                            {key.replace(/_/g, " ")}:
-                          </span>
-                          <span className="font-mono text-emerald-700 font-semibold">
-                            {val.ml_mae.toFixed(1)}m ({val.percentage_improvement > 0 ? `+${val.percentage_improvement.toFixed(0)}%` : `${val.percentage_improvement.toFixed(0)}%`})
+      {/* Operational Table Container */}
+      <div className="bg-[#FFFFFF] border border-[#D9DEE3] rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.03)] overflow-hidden">
+        {/* Search & Actions Bar inside Table Card */}
+        <div className="p-3 sm:p-3.5 border-b border-[#D9DEE3] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[#FFFFFF]">
+          <div className="relative flex-1 max-w-md">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#8A949C]">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter train # or station..."
+              className="w-full pl-9 pr-3 py-1.5 bg-[#FFFFFF] border border-[#D9DEE3] rounded-md text-xs sm:text-[13px] text-[#172026] placeholder-[#8A949C] focus:outline-none focus:border-[#2563A8] focus:ring-1 focus:ring-[#2563A8] transition-colors"
+            />
+          </div>
+
+          {/* Quick Simulation / Disruption Trigger */}
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen(true)}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#FFFFFF] hover:bg-[#F0F3F5] text-[#172026] border border-[#D9DEE3] rounded-md text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 text-[#B77900]" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+              <span>Inject Event</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Error Notification */}
+        {error && (
+          <div className="p-6 text-center bg-rose-50 border-b border-rose-200 text-[#D64545]">
+            <p className="font-semibold text-sm">Failed to connect to backend server</p>
+            <p className="text-xs text-rose-600 mt-1">{error}</p>
+            <button
+              type="button"
+              onClick={() => fetchDashboardData(true)}
+              className="mt-3 px-3 py-1.5 bg-[#FFFFFF] border border-rose-300 text-xs font-semibold rounded-md shadow-2xs hover:bg-rose-100/50"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
+
+        {/* View Content: Table or Cards */}
+        {loading ? (
+          <div className="p-4">
+            <table className="w-full">
+              <tbody className="divide-y divide-[#D9DEE3]/70">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <TableRowSkeleton key={i} cols={9} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : filteredTrains.length === 0 ? (
+          <div className="p-12 text-center text-[#66717A]">
+            <p className="text-sm font-semibold">No active trains matching query.</p>
+            <p className="text-xs text-[#8A949C] mt-1">Try clearing search or filters.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setStatusFilter("ALL");
+              }}
+              className="mt-3 px-3 py-1.5 bg-[#F0F3F5] text-xs font-medium rounded-md hover:bg-[#E2E8F0]"
+            >
+              Clear Filters
+            </button>
+          </div>
+        ) : viewMode === "table" ? (
+          /* Operational Train Table matching visual reference */
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse text-xs sm:text-[13px]">
+              <thead>
+                <tr className="border-b border-[#D9DEE3] bg-[#FFFFFF] text-[11px] font-semibold text-[#66717A] tracking-wider uppercase">
+                  <th className="py-2.5 px-3.5 pl-4">TRAIN</th>
+                  <th className="py-2.5 px-3">SOURCE</th>
+                  <th className="py-2.5 px-3">CURRENT STATION</th>
+                  <th className="py-2.5 px-3 text-right">SPEED</th>
+                  <th className="py-2.5 px-3 text-center">DELAY</th>
+                  <th className="py-2.5 px-2 text-center">TREND</th>
+                  <th className="py-2.5 px-3">NEXT STATION</th>
+                  <th className="py-2.5 px-3 text-right">BASELINE ETA</th>
+                  <th className="py-2.5 px-4 text-right">ML ETA</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#D9DEE3]/70 bg-[#FFFFFF]">
+                {filteredTrains.map((train) => {
+                  const state = train.current_state;
+                  const isHalted = state?.status === "HALTED";
+                  const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
+                  const speedVal = state?.speed_kmh ?? 0;
+                  const trendVal = train.delay_trend ?? 0;
+
+                  // High severity stripe on left edge (like 12302 in reference)
+                  const leftStripeClass = isHalted || delayVal > 15
+                    ? "border-l-4 border-l-[#D64545]"
+                    : "border-l-4 border-l-transparent";
+
+                  return (
+                    <tr
+                      key={train.id}
+                      onClick={() => router.push(`/trains/${train.train_number}`)}
+                      className={`${leftStripeClass} hover:bg-[#F8FAFB] transition-colors cursor-pointer group`}
+                    >
+                      {/* TRAIN: Status dot + Train number */}
+                      <td className="py-2.5 px-3.5 pl-3 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              isHalted
+                                ? "bg-[#D64545]"
+                                : "bg-[#168A55]"
+                            }`}
+                            title={isHalted ? "Train Halted" : "Running Normally"}
+                          />
+                          <span className="font-mono font-bold text-[#172026] text-xs sm:text-[13px] group-hover:text-[#2563A8] transition-colors">
+                            {train.train_number}
                           </span>
                         </div>
-                      ))}
+                      </td>
+
+                      {/* SOURCE */}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span className="inline-block px-1.5 py-0.2 rounded text-[10px] font-mono font-medium tracking-wider bg-[#F0F3F5] text-[#66717A] border border-[#D9DEE3]">
+                          {train.data_source === "LIVE_API" || state?.source === "external_api"
+                            ? "LIVE"
+                            : "SIMULATOR"}
+                        </span>
+                      </td>
+
+                      {/* CURRENT STATION */}
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono font-medium text-[#172026]">
+                        {train.current_station || state?.current_station_code || "--"}
+                      </td>
+
+                      {/* SPEED */}
+                      <td className="py-2.5 px-3 whitespace-nowrap text-right font-mono text-[#66717A]">
+                        {speedVal.toFixed(0)} km/h
+                      </td>
+
+                      {/* DELAY */}
+                      <td className="py-2.5 px-3 whitespace-nowrap text-center font-mono">
+                        {delayVal > 1.0 ? (
+                          <span className="font-bold text-[#D64545]">
+                            +{delayVal.toFixed(1)} min
+                          </span>
+                        ) : (
+                          <span className="text-[#66717A]">On Time</span>
+                        )}
+                      </td>
+
+                      {/* TREND */}
+                      <td className="py-2.5 px-2 whitespace-nowrap text-center font-mono text-xs">
+                        {trendVal > 0 ? (
+                          <span className="text-[#D64545] font-bold" title="Delay increasing">
+                            ↗
+                          </span>
+                        ) : trendVal < 0 ? (
+                          <span className="text-[#168A55] font-bold" title="Recovering time">
+                            ↘
+                          </span>
+                        ) : (
+                          <span className="text-[#8A949C]" title="Stable">
+                            →
+                          </span>
+                        )}
+                      </td>
+
+                      {/* NEXT STATION */}
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono font-medium text-[#172026]">
+                        {train.next_station || state?.next_station_code || "Terminus"}
+                      </td>
+
+                      {/* BASELINE ETA */}
+                      <td className="py-2.5 px-3 whitespace-nowrap text-right font-mono font-medium text-[#66717A]">
+                        {train.baseline_eta ? formatTime(train.baseline_eta) : "--:--"}
+                      </td>
+
+                      {/* ML ETA */}
+                      <td className="py-2.5 px-4 text-right whitespace-nowrap font-mono font-bold">
+                        {train.ml_eta ? (
+                          <span
+                            className={
+                              delayVal > 5.0
+                                ? "text-[#D64545]"
+                                : "text-[#168A55]"
+                            }
+                          >
+                            {formatTime(train.ml_eta)}
+                          </span>
+                        ) : (
+                          <span className="text-[#8A949C]">--:--</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          /* Clean Cards Grid View */
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-[#F5F7F8]">
+            {filteredTrains.map((train) => {
+              const state = train.current_state;
+              const isHalted = state?.status === "HALTED";
+              const delayVal = train.current_delay_minutes ?? state?.current_delay_minutes ?? 0;
+              return (
+                <div
+                  key={train.id}
+                  onClick={() => router.push(`/trains/${train.train_number}`)}
+                  className={`bg-[#FFFFFF] p-3.5 rounded-lg border border-[#D9DEE3] hover:border-[#2563A8] transition-all cursor-pointer shadow-2xs space-y-2.5 ${
+                    isHalted ? "border-l-4 border-l-[#D64545]" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isHalted ? "bg-[#D64545]" : "bg-[#168A55]"
+                        }`}
+                      />
+                      <span className="font-mono font-bold text-sm text-[#172026]">
+                        {train.train_number}
+                      </span>
+                    </div>
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-[#F0F3F5] text-[#66717A] border border-[#D9DEE3]">
+                      {train.data_source === "LIVE_API" ? "LIVE" : "SIM"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-[#66717A] truncate font-medium">
+                    {train.name}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-[#D9DEE3]/70 font-mono">
+                    <div>
+                      <div className="text-[10px] text-[#8A949C]">AT / NEXT</div>
+                      <div className="font-semibold text-[#172026]">
+                        {train.current_station || "--"} &rarr; {train.next_station || "--"}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] text-[#8A949C]">DELAY</div>
+                      <div
+                        className={
+                          delayVal > 1.0
+                            ? "font-bold text-[#D64545]"
+                            : "text-[#66717A]"
+                        }
+                      >
+                        {delayVal > 1.0 ? `+${delayVal.toFixed(1)}m` : "On Time"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-[#D9DEE3]/70 text-xs font-mono">
+                    <div className="text-[#66717A]">
+                      Baseline: {train.baseline_eta ? formatTime(train.baseline_eta) : "--:--"}
+                    </div>
+                    <div className="font-bold text-[#168A55]">
+                      ML: {train.ml_eta ? formatTime(train.ml_eta) : "--:--"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Table Footer with Summary & Refresh Status */}
+        <div className="p-3 border-t border-[#D9DEE3] bg-[#FFFFFF] flex flex-col sm:flex-row items-center justify-between text-xs text-[#8A949C] gap-2">
+          <div>
+            Showing 1-{filteredTrains.length} of {totalTrainsCount} active trains
+          </div>
+          <div className="flex items-center space-x-2">
+            {isUpdating && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2563A8] animate-ping" />
+            )}
+            <span>
+              Last updated: {lastRefreshed ? formatTime(lastRefreshed.toISOString()) : "Just now"}
+            </span>
+            <button
+              type="button"
+              onClick={() => fetchDashboardData(false)}
+              className="text-[#66717A] hover:text-[#172026] ml-1 p-0.5"
+              title="Refresh Fleet State"
+            >
+              ↻
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SIMULATION & EVENT INJECTION DRAWER                                       */}
+      {/* Preserves 100% of simulator and demo capabilities without cluttering      */}
+      {/* the main operations floor.                                                */}
+      {/* ========================================================================= */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-[#172026]/30 backdrop-blur-2xs transition-opacity"
+            onClick={() => setIsDrawerOpen(false)}
+          />
+
+          {/* Slide-over panel */}
+          <div className="relative w-full max-w-lg bg-[#FFFFFF] border-l border-[#D9DEE3] shadow-xl flex flex-col h-full z-50">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-[#D9DEE3] flex items-center justify-between bg-[#F8FAFB]">
+              <div className="flex items-center space-x-2">
+                <span className="text-base">⚡</span>
+                <h2 className="text-sm font-bold text-[#172026] uppercase tracking-wide">
+                  Simulation & Disruption Control
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDrawerOpen(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-[#D9DEE3] text-[#66717A] hover:text-[#172026] hover:bg-[#FFFFFF]"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-6 text-xs">
+              {/* SECTION 1: Deterministic Demo Scenario (Seed 42) */}
+              <div className="p-3.5 bg-[#F8FAFB] border border-[#D9DEE3] rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#172026] uppercase tracking-wider text-[11px]">
+                    Deterministic Demo Scenario
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetDemo}
+                    disabled={demoLoading}
+                    className="px-2 py-1 rounded bg-[#FFFFFF] border border-[#D9DEE3] text-[11px] font-semibold text-[#172026] hover:bg-[#F0F3F5] cursor-pointer"
+                  >
+                    {demoLoading ? "Resetting..." : "Reset to Baseline"}
+                  </button>
+                </div>
+
+                {demoScenario && (
+                  <div className="p-2.5 bg-[#FFFFFF] border border-[#D9DEE3] rounded text-xs space-y-1.5 font-mono">
+                    <div className="flex justify-between text-[#66717A]">
+                      <span>Train: <strong>{demoScenario.train_number}</strong></span>
+                      <span className="font-semibold text-[#172026]">{demoScenario.train_status}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Section: {demoScenario.current_station} &rarr; {demoScenario.next_station}</span>
+                      <span className="font-bold text-[#D64545]">
+                        +{demoScenario.current_delay_minutes?.toFixed(1) ?? "0.0"}m delay
+                      </span>
                     </div>
                   </div>
                 )}
 
-                <div className="text-[11px] text-slate-400 pt-1">
-                  Evaluated on {metrics.test_samples} held-out samples.
+                {/* Pre-packaged Actions */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-[#8A949C]">
+                    Trigger Disruption Actions:
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteDemoAction("signal_halt")}
+                      disabled={demoActionActive !== null}
+                      className="p-2 bg-[#FFFFFF] hover:bg-rose-50 border border-[#D9DEE3] hover:border-[#D64545] rounded text-left transition-colors cursor-pointer"
+                    >
+                      <div className="font-bold text-[#D64545] text-[11px]">1. Signal Halt</div>
+                      <div className="text-[10px] text-[#8A949C]">+12m at red aspect</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteDemoAction("congestion")}
+                      disabled={demoActionActive !== null}
+                      className="p-2 bg-[#FFFFFF] hover:bg-amber-50 border border-[#D9DEE3] hover:border-[#B77900] rounded text-left transition-colors cursor-pointer"
+                    >
+                      <div className="font-bold text-[#B77900] text-[11px]">2. Freight Congestion</div>
+                      <div className="text-[10px] text-[#8A949C]">+8m speed drop</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteDemoAction("speed_restriction")}
+                      disabled={demoActionActive !== null}
+                      className="p-2 bg-[#FFFFFF] hover:bg-blue-50 border border-[#D9DEE3] hover:border-[#2563A8] rounded text-left transition-colors cursor-pointer"
+                    >
+                      <div className="font-bold text-[#2563A8] text-[11px]">3. Speed Caution</div>
+                      <div className="text-[10px] text-[#8A949C]">+15m track work</div>
+                    </button>
+                  </div>
                 </div>
+
+                {/* Action Feedback */}
+                {demoResult && (
+                  <div className="p-2.5 bg-[#EBF7EE] border border-[#B4E2C1] rounded text-[11px] text-[#168A55] font-mono">
+                    ✓ {demoResult.action_name} executed &bull; New delay: +{(demoResult.new_delay_minutes ?? 0).toFixed(1)}m &bull; ML ETA: {formatTime(demoResult.ml_eta)}
+                  </div>
+                )}
+                {demoError && (
+                  <div className="p-2.5 bg-[#FDF2F2] border border-[#F5C2C2] rounded text-[11px] text-[#D64545]">
+                    {demoError}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="text-xs text-slate-500 py-2">
-                Evaluation metrics currently unavailable.
-              </div>
-            )}
+
+              {/* SECTION 2: Custom Disruption Event Injection */}
+              <form onSubmit={handleInjectEvent} className="p-3.5 bg-[#FFFFFF] border border-[#D9DEE3] rounded-lg space-y-3">
+                <span className="font-bold text-[#172026] uppercase tracking-wider text-[11px] block">
+                  Custom Event Injection
+                </span>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
+                    Select Target Train
+                  </label>
+                  <select
+                    value={selectedTrain}
+                    onChange={(e) => setSelectedTrain(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#F5F7F8] border border-[#D9DEE3] rounded text-xs font-mono text-[#172026]"
+                  >
+                    {trains.map((t) => (
+                      <option key={t.id} value={t.train_number}>
+                        {t.train_number} - {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
+                      Event Type
+                    </label>
+                    <select
+                      value={eventType}
+                      onChange={(e) => setEventType(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-[#F5F7F8] border border-[#D9DEE3] rounded text-xs font-mono text-[#172026]"
+                    >
+                      <option value="SIGNAL_HALT">Signal Halt</option>
+                      <option value="SPEED_RESTRICTION">Speed Restriction</option>
+                      <option value="WEATHER">Adverse Weather</option>
+                      <option value="CONGESTION">Platform Congestion</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
+                      Delay (Minutes)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      value={delayMinutes}
+                      onChange={(e) => setDelayMinutes(Number(e.target.value))}
+                      className="w-full px-2 py-1.5 bg-[#F5F7F8] border border-[#D9DEE3] rounded text-xs font-mono text-[#172026]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#66717A] mb-1">
+                    Operational Note
+                  </label>
+                  <input
+                    type="text"
+                    value={locationNote}
+                    onChange={(e) => setLocationNote(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#F5F7F8] border border-[#D9DEE3] rounded text-xs text-[#172026]"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingEvent}
+                  className="w-full py-2 bg-[#172026] hover:bg-[#2563A8] text-white font-semibold rounded text-xs transition-colors cursor-pointer"
+                >
+                  {submittingEvent ? "Injecting..." : "Simulate Event"}
+                </button>
+
+                {injectionResult && (
+                  <div className="p-2.5 bg-[#EBF7EE] border border-[#B4E2C1] rounded text-[11px] text-[#168A55] font-mono">
+                    ✓ {injectionResult.message} &bull; Updated ML ETA: {formatTime(injectionResult.ml_eta)}
+                  </div>
+                )}
+                {injectionError && (
+                  <div className="p-2.5 bg-[#FDF2F2] border border-[#F5C2C2] rounded text-[11px] text-[#D64545]">
+                    {injectionError}
+                  </div>
+                )}
+              </form>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

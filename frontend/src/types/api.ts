@@ -28,6 +28,7 @@ export interface RouteStationInfo {
   scheduled_arrival: string | null;
   scheduled_departure: string | null;
   scheduled_stop_minutes: number;
+  dwell_time_minutes?: number;
 }
 
 export interface ConfidenceRange {
@@ -267,6 +268,8 @@ export interface ModelMetricsResponse {
   by_horizon?: Record<string, HorizonMetrics> | null;
   metrics_by_disruption_status: Record<string, DisruptionMetrics> | null;
   by_disruption?: Record<string, DisruptionMetrics> | null;
+  disruption_breakdown?: { none?: DisruptionMetrics; with_disruption?: DisruptionMetrics; [key: string]: DisruptionMetrics | undefined } | null;
+  metrics_by_disruption?: Record<string, DisruptionMetrics> | null;
   cross_tabulation?: Record<string, HorizonMetrics> | null;
   overall?: HorizonMetrics | null;
   evaluation_timestamp: string | null;

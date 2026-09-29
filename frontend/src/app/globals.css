@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f5f7f8;
+  --foreground: #172026;
+  --surface-primary: #ffffff;
+  --surface-secondary: #f0f3f5;
+  --border-color: #d9dee3;
+  --text-primary: #172026;
+  --text-secondary: #66717a;
+  --text-muted: #8a949c;
+
+  /* Semantic Railway Status Tokens */
+  --status-running: #168a55;
+  --status-warning: #b77900;
+  --status-critical: #d64545;
+  --status-info: #2563a8;
 }
 
 @theme inline {
@@ -13,7 +25,7 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -25,6 +37,11 @@ code,
 time {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* Operational Control Room Table Styles */
+.control-room-border {
+  border-color: #d9dee3;
 }
 
 /* Subtle Control Room shimmer effect for loading states */
@@ -40,9 +57,9 @@ time {
 .animate-shimmer {
   background: linear-gradient(
     90deg,
-    rgba(241, 245, 249, 0.8) 25%,
+    rgba(240, 243, 245, 0.8) 25%,
     rgba(226, 232, 240, 0.9) 37%,
-    rgba(241, 245, 249, 0.8) 63%
+    rgba(240, 243, 245, 0.8) 63%
   );
   background-size: 200% 100%;
   animation: controlRoomShimmer 1.5s ease-in-out infinite;
@@ -50,20 +67,20 @@ time {
 
 /* Custom restrained scrollbar for dense tables */
 .custom-scrollbar::-webkit-scrollbar {
-  height: 6px;
-  width: 6px;
+  height: 5px;
+  width: 5px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: #f1f5f9;
-  border-radius: 4px;
+  background: #f0f3f5;
+  border-radius: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: #cbd3d9;
+  border-radius: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #a3afb9;
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, formatDateTime, formatTime, formatDelay } from "@/lib/api";
+import { api, formatTime, formatDelay } from "@/lib/api";
 import {
   TrainListItem,
   TrainDetailResponse,
@@ -12,7 +12,7 @@ import {
 import UncertaintyRangeBar from "@/components/UncertaintyRangeBar";
 import { StatusBadge } from "@/components/StatusBadge";
 import EtaComparisonBadge from "@/components/EtaComparisonBadge";
-import { CardSkeleton, Skeleton } from "@/components/LoadingSkeleton";
+import { CardSkeleton } from "@/components/LoadingSkeleton";
 
 function PassengerViewContent() {
   const searchParams = useSearchParams();
@@ -58,7 +58,6 @@ function PassengerViewContent() {
         setTrainDetails(data);
         setLastRefreshed(new Date());
 
-        // Default selected station to immediate next upcoming station if not set or invalid
         if (data.upcoming_stations && data.upcoming_stations.length > 0) {
           const exists = data.upcoming_stations.some(
             (s) => s.station_code === selectedStationCode
@@ -112,7 +111,7 @@ function PassengerViewContent() {
     );
   }, [trainsList, searchQuery]);
 
-  // Current target upcoming station forecast
+  // Target upcoming station forecast
   const targetStationETA: UpcomingStationETA | null = useMemo(() => {
     if (!trainDetails?.upcoming_stations || trainDetails.upcoming_stations.length === 0) {
       return null;
@@ -140,59 +139,51 @@ function PassengerViewContent() {
   const currentStation = trainDetails?.current_station || "Origin Station";
 
   return (
-    <div className="max-w-xl mx-auto space-y-6 pb-12">
-      {/* Top Mobile Bar */}
+    <div className="max-w-2xl mx-auto space-y-4 pb-10">
+      {/* Top Header Bar */}
       <div className="flex items-center justify-between">
         <Link
           href="/"
-          className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center transition-colors"
+          className="text-xs font-medium text-[#66717A] hover:text-[#172026] flex items-center transition-colors"
         >
           &larr; Back to Control Room
         </Link>
         <div className="flex items-center space-x-2">
           {isRefreshing ? (
-            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 animate-pulse border border-blue-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#EBF3FC] text-[#2563A8] border border-[#BFDBFE]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2563A8] animate-ping" />
               <span>Updating...</span>
             </span>
           ) : (
-            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>Live Sync (10s)</span>
+            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#EBF7EE] text-[#168A55] border border-[#B4E2C1]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#168A55]" />
+              <span>Live Telemetry</span>
             </span>
           )}
           <button
             type="button"
             onClick={() => fetchSelectedTrain(selectedTrainNumber)}
-            className="text-[11px] text-slate-500 hover:text-slate-800 border border-slate-200 rounded px-1.5 py-0.5 bg-white hover:bg-slate-50 transition-colors"
+            className="text-[11px] text-[#66717A] hover:text-[#172026] border border-[#D9DEE3] rounded px-1.5 py-0.5 bg-[#FFFFFF] hover:bg-[#F0F3F5] transition-colors cursor-pointer"
             title="Refresh now"
           >
             ↻
           </button>
-          <span className="text-[11px] text-slate-400 font-mono">
+          <span className="text-[11px] text-[#8A949C] font-mono">
             {formatTime(lastRefreshed.toISOString())}
           </span>
         </div>
       </div>
 
-      {/* Hero Title */}
-      <div className="text-center space-y-1">
-        <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-700 text-xl mb-1 shadow-2xs">
-          🚆
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Passenger Live ETA Lookup
-        </h1>
-        <p className="text-xs text-slate-500">
-          Real-time dynamic arrival forecasts powered by machine learning.
-        </p>
-      </div>
-
       {/* Train Selector Card */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-          Select or Search Your Train
-        </label>
+      <div className="bg-[#FFFFFF] p-4 rounded-lg border border-[#D9DEE3] shadow-2xs space-y-2.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-[#66717A]">
+            Select / Search Train
+          </label>
+          <span className="text-[10px] text-[#8A949C] font-mono">
+            {trainsList.length} Active Trains
+          </span>
+        </div>
 
         {/* Dropdown Select */}
         <select
@@ -201,7 +192,7 @@ function PassengerViewContent() {
             setSelectedTrainNumber(e.target.value);
             setSearchQuery("");
           }}
-          className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition-all"
+          className="w-full px-3 py-2 bg-[#F8FAFB] border border-[#D9DEE3] rounded-md text-xs sm:text-[13px] font-semibold text-[#172026] focus:bg-[#FFFFFF] focus:border-[#2563A8] focus:outline-none transition-all font-mono"
         >
           {loadingList ? (
             <option>Loading available trains...</option>
@@ -221,18 +212,18 @@ function PassengerViewContent() {
             placeholder="Type train number or name..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/50 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+            className="w-full pl-7 pr-3 py-1.5 text-xs border border-[#D9DEE3] rounded-md bg-[#FFFFFF] focus:border-[#2563A8] focus:outline-none"
           />
-          <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">
+          <span className="absolute left-2.5 top-2 text-[11px] text-[#8A949C]">
             🔍
           </span>
         </div>
 
         {/* Filtered suggestions list when typing */}
         {searchQuery.trim().length > 0 && (
-          <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg text-xs bg-white shadow-lg">
+          <div className="max-h-36 overflow-y-auto divide-y divide-[#D9DEE3]/70 border border-[#D9DEE3] rounded-md text-xs bg-[#FFFFFF] shadow-md">
             {filteredTrains.length === 0 ? (
-              <div className="p-2 text-center text-slate-400">
+              <div className="p-2 text-center text-[#8A949C]">
                 No matching trains found
               </div>
             ) : (
@@ -244,12 +235,12 @@ function PassengerViewContent() {
                     setSelectedTrainNumber(t.train_number);
                     setSearchQuery("");
                   }}
-                  className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between"
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#F0F3F5] flex items-center justify-between"
                 >
-                  <span className="font-semibold text-slate-800">
+                  <span className="font-semibold text-[#172026]">
                     {t.train_number} - {t.name}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-[10px] text-[#8A949C] font-mono">
                     {t.current_station || "Origin"}
                   </span>
                 </button>
@@ -258,7 +249,7 @@ function PassengerViewContent() {
           </div>
         )}
 
-        {/* Quick Tap Pills for Mobile */}
+        {/* Quick Tap Pills */}
         <div className="flex flex-wrap gap-1.5 pt-1">
           {["12302", "12952", "12028", "12260"].map((num) => {
             const isCurrent = selectedTrainNumber === num;
@@ -267,10 +258,10 @@ function PassengerViewContent() {
                 key={num}
                 type="button"
                 onClick={() => setSelectedTrainNumber(num)}
-                className={`px-2.5 py-1 text-xs rounded-full border transition-all ${
+                className={`px-2 py-0.5 text-xs rounded border transition-all font-mono ${
                   isCurrent
-                    ? "bg-blue-600 text-white border-blue-600 font-semibold shadow-xs"
-                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+                    ? "bg-[#172026] text-white border-[#172026] font-semibold shadow-2xs"
+                    : "bg-[#F0F3F5] hover:bg-[#E2E8F0] text-[#66717A] border-[#D9DEE3]"
                 }`}
               >
                 #{num}
@@ -282,88 +273,92 @@ function PassengerViewContent() {
 
       {/* Loading Details State */}
       {loadingDetails && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <CardSkeleton />
         </div>
       )}
 
       {/* Error State */}
       {error && !loadingDetails && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs space-y-1">
+        <div className="p-4 bg-rose-50 border border-rose-200 text-[#D64545] rounded-lg text-xs space-y-1">
           <div className="font-bold">Error Loading Train Information</div>
           <div>{error}</div>
           <button
+            type="button"
             onClick={() => fetchSelectedTrain(selectedTrainNumber)}
-            className="mt-2 text-xs font-semibold text-rose-900 underline"
+            className="mt-1 text-xs font-semibold text-rose-900 underline"
           >
             Tap to retry
           </button>
         </div>
       )}
 
-      {/* PASSENGER CARD: Current Station, Delay, Upcoming Station, Expected Arrival, Confidence Range */}
+      {/* Main Passenger Card */}
       {trainDetails && !loadingDetails && (
-        <div className="space-y-4">
-          {/* Main Card */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+        <div className="space-y-3">
+          <div className="bg-[#FFFFFF] rounded-lg border border-[#D9DEE3] shadow-2xs overflow-hidden">
             {/* Train Info Header */}
-            <div className="bg-linear-to-r from-slate-900 to-slate-800 text-white p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold tracking-wider text-blue-300 uppercase">
+            <div className="bg-[#F8FAFB] border-b border-[#D9DEE3] p-4 flex items-center justify-between">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-mono font-bold text-base text-[#172026]">
+                    {trainDetails.train_number}
+                  </span>
+                  <span className="text-xs font-semibold text-[#172026]">
+                    &mdash; {trainName}
+                  </span>
+                </div>
+                <div className="text-[11px] text-[#66717A] mt-0.5">
                   {trainDetails.train_type} &bull; Route #{trainDetails.route_id}
-                </span>
-                <StatusBadge status={trainDetails.current_state?.status} size="sm" />
+                </div>
               </div>
-              <h2 className="text-xl font-bold mt-1 tracking-tight">
-                {trainDetails.train_number} &mdash; {trainName}
-              </h2>
+              <StatusBadge status={trainDetails.current_state?.status} size="sm" />
             </div>
 
-            <div className="p-5 space-y-5">
+            <div className="p-4 space-y-4">
               {/* Telemetry Strip: Current Station + Current Delay */}
-              <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+              <div className="grid grid-cols-2 gap-3 p-3 bg-[#F8FAFB] rounded-lg border border-[#D9DEE3]">
                 {/* 1. Current Station */}
                 <div>
-                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Current Station
+                  <div className="text-[10px] font-bold text-[#8A949C] uppercase tracking-wider">
+                    Current Location
                   </div>
-                  <div className="text-base font-bold text-slate-900 mt-0.5 flex items-center space-x-1.5">
-                    <span className="text-blue-600">📍</span>
-                    <span>{currentStation}</span>
+                  <div className="text-sm font-bold font-mono text-[#172026] mt-0.5">
+                    {currentStation}
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
+                  <div className="text-[11px] text-[#66717A] mt-0.5 font-mono">
                     Speed: {trainDetails.current_state?.speed_kmh?.toFixed(0) ?? 0} km/h
                   </div>
                 </div>
 
                 {/* 2. Current Delay */}
                 <div>
-                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Current Delay
+                  <div className="text-[10px] font-bold text-[#8A949C] uppercase tracking-wider">
+                    Operational Status
                   </div>
-                  <div className="mt-1">
+                  <div className="mt-0.5">
                     <span
-                      className={`inline-block px-2.5 py-0.5 text-xs font-bold border rounded-md ${delayInfo.colorClass}`}
+                      className={`inline-block px-2 py-0.5 text-xs font-mono font-bold border rounded ${delayInfo.colorClass}`}
                     >
                       {delayInfo.text}
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    {currentDelayMinutes <= 0.5 ? "Running smoothly" : "Behind schedule"}
+                  <div className="text-[11px] text-[#8A949C] mt-0.5">
+                    {currentDelayMinutes <= 0.5 ? "On schedule" : "Accumulated delay"}
                   </div>
                 </div>
               </div>
 
               {/* 3. Upcoming Station Selector */}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                  <span className="uppercase tracking-wider">
-                    Upcoming Station
+                <div className="flex items-center justify-between text-xs font-semibold text-[#66717A]">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">
+                    Select Your Destination Station
                   </span>
                   {trainDetails.upcoming_stations &&
                     trainDetails.upcoming_stations.length > 1 && (
-                      <span className="text-[11px] text-blue-600 font-normal">
-                        Select stop &darr;
+                      <span className="text-[11px] text-[#2563A8] font-normal">
+                        Change stop &darr;
                       </span>
                     )}
                 </div>
@@ -373,7 +368,7 @@ function PassengerViewContent() {
                   <select
                     value={selectedStationCode}
                     onChange={(e) => setSelectedStationCode(e.target.value)}
-                    className="w-full px-3 py-2 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-bold text-blue-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 bg-[#F8FAFB] border border-[#D9DEE3] rounded-md text-xs sm:text-[13px] font-bold font-mono text-[#172026] focus:bg-[#FFFFFF] focus:border-[#2563A8] focus:outline-none"
                   >
                     {trainDetails.upcoming_stations.map((stn, idx) => (
                       <option key={stn.station_code} value={stn.station_code}>
@@ -384,13 +379,13 @@ function PassengerViewContent() {
                     ))}
                   </select>
                 ) : (
-                  <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-500 text-center font-medium">
+                  <div className="p-3 bg-[#F8FAFB] rounded border border-[#D9DEE3] text-xs text-[#66717A] text-center font-medium">
                     Train has reached its final destination.
                   </div>
                 )}
               </div>
 
-              {/* 4. Expected Arrival & Prediction Uncertainty Window */}
+              {/* 4. Expected Arrival & Uncertainty Window */}
               {targetStationETA ? (
                 <div className="space-y-3">
                   <UncertaintyRangeBar
@@ -402,23 +397,23 @@ function PassengerViewContent() {
                     variant="card"
                   />
 
-                  {/* Supplemental Timetable & Distance Details */}
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2.5">
+                  {/* Supplemental Timetable Details */}
+                  <div className="p-3 bg-[#F8FAFB] rounded-lg border border-[#D9DEE3] text-xs space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500 font-medium">Timetable Schedule:</span>
+                      <span className="text-[#66717A]">Timetable Schedule:</span>
                       <EtaComparisonBadge type="scheduled" time={targetStationETA.scheduled_eta} size="sm" />
                     </div>
                     {targetStationETA.baseline_eta && (
-                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60">
-                        <span className="text-slate-500 font-medium">Speed Heuristic Baseline:</span>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-[#D9DEE3]/70">
+                        <span className="text-[#66717A]">Baseline Extrapolation:</span>
                         <EtaComparisonBadge type="baseline" time={targetStationETA.baseline_eta} size="sm" />
                       </div>
                     )}
                     {targetStationETA.predicted_remaining_minutes !== undefined &&
                       targetStationETA.predicted_remaining_minutes !== null && (
-                        <div className="flex items-center justify-between text-slate-600 pt-1.5 border-t border-slate-200/60">
+                        <div className="flex items-center justify-between text-[#66717A] pt-1.5 border-t border-[#D9DEE3]/70 font-mono">
                           <span>Estimated Remaining Transit:</span>
-                          <span className="font-mono font-bold text-blue-700">
+                          <span className="font-bold text-[#2563A8]">
                             ~{(targetStationETA.predicted_remaining_minutes ?? 0).toFixed(0)} min away ({(targetStationETA.distance_to_go_km ?? 0).toFixed(1)} km)
                           </span>
                         </div>
@@ -432,15 +427,14 @@ function PassengerViewContent() {
                 <button
                   type="button"
                   onClick={() => fetchSelectedTrain(selectedTrainNumber)}
-                  className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-2xs"
+                  className="py-2 px-3 rounded-md bg-[#172026] hover:bg-[#2563A8] text-white font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-2xs cursor-pointer"
                 >
-                  <span>🔄</span>
-                  <span>Refresh Now</span>
+                  <span>↻ Refresh</span>
                 </button>
 
                 <Link
                   href={`/trains/${encodeURIComponent(trainDetails.train_number)}`}
-                  className="py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-semibold text-xs transition-colors flex items-center justify-center space-x-1"
+                  className="py-2 px-3 rounded-md bg-[#FFFFFF] hover:bg-[#F0F3F5] border border-[#D9DEE3] text-[#172026] font-semibold text-xs transition-colors flex items-center justify-center space-x-1"
                 >
                   <span>Full Route &rarr;</span>
                 </Link>
@@ -457,8 +451,8 @@ export default function PassengerLookupPage() {
   return (
     <Suspense
       fallback={
-        <div className="py-16 text-center text-sm text-slate-500">
-          Loading Passenger View...
+        <div className="py-16 text-center text-xs text-[#8A949C]">
+          Loading Passenger Lookup...
         </div>
       }
     >
