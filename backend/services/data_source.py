@@ -12,15 +12,17 @@ Enforces:
 4. Zero continuous polling.
 """
 
+from __future__ import annotations
+
 from enum import Enum
 import os
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Union, List, Any, TYPE_CHECKING
+from typing import Optional, Union, List, Any
 from sqlalchemy.orm import Session
 
 from backend.services.schemas import TrainRunningState
-from backend.simulator.engine import SimulatorStoppedError
+from backend.simulator.engine import SimulatorStoppedError, TrainSimulator
 from backend.services.railway_api_client import (
     RailRadarClient,
     RailwayAPIError,
@@ -33,9 +35,6 @@ from backend.services.railway_api_client import (
     ServiceUnavailableError,
     sanitize_secret,
 )
-
-if TYPE_CHECKING:
-    from backend.simulator.engine import TrainSimulator
 
 logger = logging.getLogger("dynamic_eta.data_source")
 
