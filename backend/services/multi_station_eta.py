@@ -209,12 +209,14 @@ class MultiStationETAService:
         elif not isinstance(journey_d, date):
             journey_d = date.today()
 
-        origin_base_dt = datetime.combine(journey_d, origin_dep_time).replace(tzinfo=timezone.utc)
-        cumulative_times = compute_cumulative_schedule_minutes(stops)
-
         obs_time = train_state.timestamp
+        ref_tz = obs_time.tzinfo if obs_time.tzinfo is not None else timezone.utc
         if obs_time.tzinfo is None:
-            obs_time = obs_time.replace(tzinfo=timezone.utc)
+            obs_time = obs_time.replace(tzinfo=ref_tz)
+
+        is_live = str(train_state.source or "").lower() in ("external_api", "live_api", "live")
+        origin_base_dt = datetime.combine(journey_d, origin_dep_time).replace(tzinfo=ref_tz)
+        cumulative_times = compute_cumulative_schedule_minutes(stops)
 
         # Track train simulation state forward segment by segment
         curr_stop = stops[curr_idx]
@@ -225,6 +227,13 @@ class MultiStationETAService:
         next_dist = float(getattr(next_immediate_stop, "distance_from_source_km", getattr(next_immediate_stop, "dist_km", curr_dist)))
         dist_covered_active_seg = progress * max(0.0, next_dist - curr_dist)
         current_train_pos_km = curr_dist + dist_covered_active_seg
+
+        curr_code_clean = getattr(curr_stop, "station_code", getattr(curr_stop, "code", ""))
+        curr_sched_time = cumulative_times.get(curr_code_clean, 0.0)
+        next_code_clean = getattr(next_immediate_stop, "station_code", getattr(next_immediate_stop, "code", ""))
+        next_sched = cumulative_times.get(next_code_clean, curr_sched_time)
+        time_cov = progress * max(0.0, next_sched - curr_sched_time)
+        curr_position_time = curr_sched_time + time_cov
 
         sim_current_time = obs_time
         sim_current_delay = max(0.0, float(train_state.current_delay_minutes or 0.0))
@@ -304,7 +313,11 @@ class MultiStationETAService:
             predicted_departure_dt = predicted_arrival_dt + timedelta(minutes=scheduled_dwell)
 
             # Update simulated state for next loop iteration
-            sched_arrival_dt = origin_base_dt + timedelta(minutes=sched_to)
+            if is_live:
+                sched_rem_to = max(0.0, sched_to - curr_position_time)
+                sched_arrival_dt = obs_time + timedelta(minutes=sched_rem_to)
+            else:
+                sched_arrival_dt = origin_base_dt + timedelta(minutes=sched_to)
             new_delay = max(0.0, (predicted_arrival_dt - sched_arrival_dt).total_seconds() / 60.0)
             sim_current_delay = round(new_delay, 2)
             sim_current_time = predicted_departure_dt
@@ -377,7 +390,7 @@ class MultiStationETAService:
                     if is_ml_fallback
                     else f"Uncalibrated heuristic MVP uncertainty interval widening with horizon (+/- {self.base_uncertainty_minutes}m * sqrt({segments_ahead}) = +/- {uncertainty_margin}m)"
                 ),
-                generated_timestamp=datetime.now(timezone.utc),
+                generated_timestamp=datetime.now(ref_tz),
                 segment_predictions=list(chained_segment_records),
             )
             station_predictions.append(station_pred)

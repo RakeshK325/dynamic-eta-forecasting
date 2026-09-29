@@ -19,7 +19,7 @@ Enforces:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -214,6 +214,17 @@ class LiveTrainLookupService:
                     target_station,
                     sanitize_secret(str(exc)),
                 )
+
+            # Ensure baseline ETA aligns directly with live timestamp and scheduled_time_to_go_min:
+            # current timestamp + scheduled_time_to_go_min + predicted_delay
+            if feat is not None and state.timestamp is not None:
+                sched_min = float(feat.scheduled_time_to_go_min)
+                curr_delay = float(state.current_delay_minutes or 0.0)
+                dist_km = float(feat.distance_to_go_km)
+                rec_rate = getattr(self.baseline_service, "recovery_rate_per_100km", 2.0)
+                raw_buf = (dist_km / 100.0) * rec_rate
+                pred_delay = max(0.0, curr_delay - min(curr_delay, raw_buf)) if curr_delay > 0.0 else curr_delay
+                baseline_eta = state.timestamp + timedelta(minutes=sched_min + pred_delay)
 
             # Step 4: ML ETA (Chained XGBoost)
             if self.multi_station_service is not None:

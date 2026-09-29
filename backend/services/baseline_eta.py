@@ -171,15 +171,29 @@ class BaselineETAService:
         curr_dist = float(getattr(curr_stop, "distance_from_source_km", getattr(curr_stop, "dist_km", 0.0)))
         target_dist = float(getattr(target_stop, "distance_from_source_km", getattr(target_stop, "dist_km", 0.0)))
 
-        # Interpolate distance along segment
+        # Segment distance and interpolation
         progress = max(0.0, min(1.0, float(train_state.segment_progress or 0.0)))
+        is_live = str(train_state.source or "").lower() in ("external_api", "live_api", "live")
+        now_dt = train_state.timestamp
+        ref_tz = now_dt.tzinfo if now_dt.tzinfo is not None else timezone.utc
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=ref_tz)
+
         if curr_idx < len(stops) - 1:
             next_stop = stops[curr_idx + 1]
             next_dist = float(getattr(next_stop, "distance_from_source_km", getattr(next_stop, "dist_km", curr_dist)))
             seg_dist = max(0.0, next_dist - curr_dist)
-            dist_covered_on_seg = progress * seg_dist
+            if is_live and train_state.next_station_distance_km is not None and seg_dist > 0:
+                live_dist_remaining = max(0.0, float(train_state.next_station_distance_km))
+                dist_covered_on_seg = max(0.0, seg_dist - min(live_dist_remaining, seg_dist))
+                eff_prog = dist_covered_on_seg / seg_dist if seg_dist > 0 else 0.0
+            else:
+                dist_covered_on_seg = progress * seg_dist
+                eff_prog = progress
         else:
             dist_covered_on_seg = 0.0
+            eff_prog = progress
+            seg_dist = 0.0
 
         current_position_km = curr_dist + dist_covered_on_seg
         distance_to_go_km = max(0.0, round(target_dist - current_position_km, 2))
@@ -187,6 +201,18 @@ class BaselineETAService:
         # Timetable scheduled arrival calculation (handling overnight crossings)
         cumulative_times = compute_cumulative_schedule_minutes(stops)
         target_sched_cumulative_min = cumulative_times.get(target_code, 0.0)
+        curr_sched_time = cumulative_times.get(curr_code, 0.0)
+
+        if curr_idx < len(stops) - 1:
+            next_code_clean = getattr(next_stop, "station_code", getattr(next_stop, "code", ""))
+            next_sched_time = cumulative_times.get(next_code_clean, curr_sched_time)
+            seg_time = max(0.0, next_sched_time - curr_sched_time)
+            time_covered_on_seg = eff_prog * seg_time
+        else:
+            time_covered_on_seg = 0.0
+
+        curr_position_time = curr_sched_time + time_covered_on_seg
+        sched_time_to_go_min = max(0.0, round(target_sched_cumulative_min - curr_position_time, 2))
 
         # Base origin datetime
         origin_stop = stops[0]
@@ -203,8 +229,11 @@ class BaselineETAService:
         elif not isinstance(journey_d, date):
             journey_d = date.today()
 
-        origin_base_dt = datetime.combine(journey_d, origin_dep_time).replace(tzinfo=timezone.utc)
-        scheduled_arrival_dt = origin_base_dt + timedelta(minutes=target_sched_cumulative_min)
+        if is_live:
+            scheduled_arrival_dt = now_dt + timedelta(minutes=sched_time_to_go_min)
+        else:
+            origin_base_dt = datetime.combine(journey_d, origin_dep_time).replace(tzinfo=ref_tz)
+            scheduled_arrival_dt = origin_base_dt + timedelta(minutes=target_sched_cumulative_min)
 
         # Calculate Recovery Buffer
         # Buffer proportional to remaining distance: (distance_to_go / 100) * recovery_rate
@@ -221,14 +250,15 @@ class BaselineETAService:
             recovery_applied = 0.0
             predicted_delay = current_delay
 
-        # Baseline ETA formula: ScheduledArrival + CurrentDelay - RecoveryApplied
-        baseline_eta = scheduled_arrival_dt + timedelta(minutes=predicted_delay)
+        # Baseline ETA formula:
+        # For live telemetry: current timestamp + scheduled_time_to_go_min + predicted_delay
+        # For simulator: ScheduledArrival + CurrentDelay - RecoveryApplied
+        if is_live:
+            baseline_eta = now_dt + timedelta(minutes=sched_time_to_go_min + predicted_delay)
+        else:
+            baseline_eta = scheduled_arrival_dt + timedelta(minutes=predicted_delay)
 
         # Physical Feasibility Guard: ETA >= CurrentTime + (Distance / MaxSpeed)
-        now_dt = train_state.timestamp
-        if now_dt.tzinfo is None:
-            now_dt = now_dt.replace(tzinfo=timezone.utc)
-
         min_travel_minutes = (distance_to_go_km / self.max_permissible_speed_kmh) * 60.0
         earliest_feasible_eta = now_dt + timedelta(minutes=min_travel_minutes)
 
@@ -251,7 +281,7 @@ class BaselineETAService:
             predicted_delay=predicted_delay,
             distance_to_go_km=distance_to_go_km,
             method="BASELINE",
-            generated_timestamp=datetime.now(timezone.utc),
+            generated_timestamp=datetime.now(ref_tz),
         )
 
     def _resolve_route_stops(

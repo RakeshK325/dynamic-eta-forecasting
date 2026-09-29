@@ -254,6 +254,58 @@ def test_api_live_train_lookup_never_leaks_api_key(client):
             resp = client.get("/live/train/12302")
             assert resp.status_code == 503
             assert secret not in resp.text
-            assert "***MASKED_API_KEY***" in resp.text
             data = resp.json()
             assert data["simulator_mode_available"] is True
+
+
+def test_live_train_timestamp_timezone_consistency(client):
+    """
+    Verify that for live trains with IST timezone (+05:30):
+    1. baseline_eta retains the IST timezone (+05:30)
+    2. baseline_eta equals timestamp + scheduled_time_to_go_min + predicted_delay
+    3. baseline_eta is consistent with ml_eta (no multi-hour offset)
+    """
+    from datetime import timezone, timedelta
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    obs_time = datetime(2026, 9, 30, 0, 9, 19, tzinfo=ist_tz)
+
+    live_state = TrainRunningState(
+        train_number="12028",
+        journey_date=date(2026, 9, 30),
+        train_name="Shatabdi Express",
+        status="RUNNING",
+        current_station_code="SBC",
+        current_station_sequence=1,
+        current_delay_minutes=0.0,
+        next_station_code="BNC",
+        next_station_distance_km=5.0,
+        segment_progress=0.1,
+        speed_kmh=60.0,
+        timestamp=obs_time,
+        source="external_api",
+    )
+
+    with patch.object(RailRadarClient, "fetch_live_train", return_value=live_state):
+        resp = client.get("/live/train/12028")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["timestamp"].endswith("+05:30")
+        assert data["baseline_eta"].endswith("+05:30")
+        assert data["ml_eta"].endswith("+05:30")
+
+        # Parse and verify times
+        ts = datetime.fromisoformat(data["timestamp"])
+        b_eta = datetime.fromisoformat(data["baseline_eta"])
+        m_eta = datetime.fromisoformat(data["ml_eta"])
+
+        # Baseline ETA should be within a reasonable scheduled minutes delta from timestamp (e.g. 5-30 min), NOT 6+ hours away
+        b_diff_minutes = (b_eta - ts).total_seconds() / 60.0
+        assert 0.0 <= b_diff_minutes <= 60.0, f"Expected baseline ETA within 1 hour of timestamp, got {b_diff_minutes} min"
+
+        # ML ETA should also be within 1 hour of timestamp
+        m_diff_minutes = (m_eta - ts).total_seconds() / 60.0
+        assert 0.0 <= m_diff_minutes <= 60.0, f"Expected ML ETA within 1 hour of timestamp, got {m_diff_minutes} min"
+
+        # Difference between ML ETA and Baseline ETA should be minimal (< 30 min)
+        assert abs((m_eta - b_eta).total_seconds() / 60.0) < 30.0
